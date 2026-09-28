@@ -70,7 +70,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	for _, key := range []string{
 		"DG_BIND_ADDR", "DG_PORT", "DG_POLL_INTERVAL",
 		"DG_COMPOSE_PATH", "DG_PASSWORD", "DG_STATS_INTERVAL",
-		"DG_STATS_WORKERS",
+		"DG_STATS_WORKERS", "DG_MODE", "DG_SWARM_POLL_INTERVAL",
 	} {
 		t.Setenv(key, "")
 	}
@@ -99,6 +99,12 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 	if cfg.PasswordHash != "" {
 		t.Errorf("PasswordHash: got %q, want empty", cfg.PasswordHash)
+	}
+	if cfg.Mode != "auto" {
+		t.Errorf("Mode: got %s, want auto", cfg.Mode)
+	}
+	if cfg.SwarmPollInterval != 5*time.Second {
+		t.Errorf("SwarmPollInterval: got %v, want 5s", cfg.SwarmPollInterval)
 	}
 }
 
@@ -380,5 +386,56 @@ func clearConfigEnv(t *testing.T, keys ...string) {
 	t.Helper()
 	for _, k := range keys {
 		t.Setenv(k, "")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DG_MODE / DG_SWARM_POLL_INTERVAL
+// ---------------------------------------------------------------------------
+
+func TestLoadConfig_Mode(t *testing.T) {
+	tests := []struct {
+		name string
+		val  string
+		want string
+	}{
+		{"empty_default", "", "auto"},
+		{"auto", "auto", "auto"},
+		{"standalone", "standalone", "standalone"},
+		{"swarm", "swarm", "swarm"},
+		{"agent", "agent", "agent"},
+		{"case_insensitive", " Swarm ", "swarm"},
+		{"invalid", "cluster", "auto"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t, "DG_PASSWORD")
+			t.Setenv("DG_MODE", tt.val)
+			if got := LoadConfig().Mode; got != tt.want {
+				t.Errorf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_SwarmPollInterval(t *testing.T) {
+	tests := []struct {
+		name string
+		val  string
+		want time.Duration
+	}{
+		{"default", "", 5 * time.Second},
+		{"custom", "10s", 10 * time.Second},
+		{"below_min", "100ms", time.Second},
+		{"invalid", "soon", 5 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t, "DG_PASSWORD")
+			t.Setenv("DG_SWARM_POLL_INTERVAL", tt.val)
+			if got := LoadConfig().SwarmPollInterval; got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

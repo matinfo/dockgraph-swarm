@@ -5,6 +5,7 @@ import (
 
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/swarm"
 )
 
 // SelfExcludeLabel marks a container as belonging to dockgraph itself,
@@ -19,6 +20,42 @@ func isSelfExcluded(labels map[string]string) bool {
 	return labels[SelfExcludeLabel] == selfExcludeValue
 }
 
+// IsServiceSelfExcluded checks both the service-level labels (deploy.labels)
+// and the container-template labels, so a DockGraph service is hidden whichever
+// place the self-exclusion label was declared.
+func IsServiceSelfExcluded(svc swarm.Service) bool {
+	if isSelfExcluded(svc.Spec.Labels) {
+		return true
+	}
+	cs := svc.Spec.TaskTemplate.ContainerSpec
+	return cs != nil && isSelfExcluded(cs.Labels)
+}
+
+// ProjectOf returns the generic project a resource belongs to: its Docker
+// Compose project, falling back to its swarm stack namespace.
+func ProjectOf(labels map[string]string) string {
+	if p := labels[composeProjectLabel]; p != "" {
+		return p
+	}
+	return labels[StackNamespaceLabel]
+}
+
+// projectLabels keeps only the project-identifying labels (compose project and
+// stack namespace) from a resource's labels, or nil when neither is set. Graph
+// nodes carry just these to keep the wire payload small.
+func projectLabels(labels map[string]string) map[string]string {
+	var out map[string]string
+	for _, k := range []string{composeProjectLabel, StackNamespaceLabel} {
+		if v := labels[k]; v != "" {
+			if out == nil {
+				out = make(map[string]string, 2)
+			}
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // isTopologyEvent returns true for Docker events that indicate a change
 // in the container/network/volume topology.
 func isTopologyEvent(action events.Action) bool {
@@ -26,7 +63,8 @@ func isTopologyEvent(action events.Action) bool {
 	case eventStart, eventStop, eventDie, eventKill,
 		eventCreate, eventDestroy, eventRename,
 		eventPause, eventUnpause, eventHealthStatus,
-		eventConnect, eventDisconnect:
+		eventConnect, eventDisconnect,
+		eventUpdate, eventRemove:
 		return true
 	}
 	return false

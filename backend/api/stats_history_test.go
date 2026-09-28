@@ -21,7 +21,7 @@ func TestHandleStatsHistory_ValidRange(t *testing.T) {
 		})
 	}
 
-	handler := HandleStatsHistory(h)
+	handler := HandleStatsHistory(h, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/stats/history?range=1h", nil)
 	w := httptest.NewRecorder()
 	handler(w, req)
@@ -44,7 +44,7 @@ func TestHandleStatsHistory_ValidRange(t *testing.T) {
 
 func TestHandleStatsHistory_LargeRange(t *testing.T) {
 	h := collector.NewStatsHistory(24 * time.Hour)
-	handler := HandleStatsHistory(h)
+	handler := HandleStatsHistory(h, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats/history?range=6h", nil)
 	w := httptest.NewRecorder()
@@ -63,7 +63,7 @@ func TestHandleStatsHistory_LargeRange(t *testing.T) {
 
 func TestHandleStatsHistory_InvalidRange(t *testing.T) {
 	h := collector.NewStatsHistory(time.Hour)
-	handler := HandleStatsHistory(h)
+	handler := HandleStatsHistory(h, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats/history?range=invalid", nil)
 	w := httptest.NewRecorder()
@@ -76,7 +76,7 @@ func TestHandleStatsHistory_InvalidRange(t *testing.T) {
 
 func TestHandleStatsHistory_DefaultRange(t *testing.T) {
 	h := collector.NewStatsHistory(time.Hour)
-	handler := HandleStatsHistory(h)
+	handler := HandleStatsHistory(h, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/stats/history", nil)
 	w := httptest.NewRecorder()

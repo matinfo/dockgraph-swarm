@@ -25,6 +25,9 @@ type DockerAPI interface {
 	EventSubscriber
 	VolumeInspector
 	NetworkInspector
+	ServiceInspector
+	ServiceLogger
+	ServiceLister
 }
 
 // SystemAPI groups Docker system-level interfaces for dashboard handlers.
@@ -35,8 +38,10 @@ type SystemAPI interface {
 }
 
 // NewServer sets up the HTTP routes for the application.
-// Pass nil for authService to disable authentication.
-func NewServer(hub *Hub, staticFS fs.FS, health HealthChecker, authService *auth.Service, docker DockerAPI, system SystemAPI, statsHistory *collector.StatsHistory, eventHistory *collector.EventHistory) http.Handler {
+// Pass nil for authService to disable authentication. mode is the resolved
+// runtime mode (collector.ModeStandalone or collector.ModeSwarm); swarm mode
+// enables the service endpoints and cluster-wide service logs.
+func NewServer(hub *Hub, staticFS fs.FS, health HealthChecker, authService *auth.Service, docker DockerAPI, system SystemAPI, statsHistory *collector.StatsHistory, eventHistory *collector.EventHistory, mode string) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -60,21 +65,34 @@ func NewServer(hub *Hub, staticFS fs.FS, health HealthChecker, authService *auth
 
 	mux.HandleFunc("GET /ws", hub.HandleWS)
 	if docker != nil {
+		// Service logs are only aggregated in swarm mode; a standalone daemon
+		// rejects swarm API calls.
+		var services StackServiceAPI
+		if mode == collector.ModeSwarm {
+			services = docker
+			mux.HandleFunc("GET /api/services/{id}/logs/history", HandleServiceLogsHistory(docker))
+			mux.HandleFunc("GET /api/services/{id}/logs", HandleServiceLogs(docker))
+			mux.HandleFunc("GET /api/services/{id}", HandleServiceInspect(docker, docker))
+		}
 		mux.HandleFunc("GET /api/containers/{id}/logs/history", HandleContainerLogsHistory(docker))
 		mux.HandleFunc("GET /api/containers/{id}/logs", HandleContainerLogs(docker))
-		mux.HandleFunc("GET /api/logs/history", HandleAggregateLogsHistory(docker, docker))
-		mux.HandleFunc("GET /api/logs", HandleAggregateLogs(docker, docker, docker))
+		mux.HandleFunc("GET /api/logs/history", HandleAggregateLogsHistory(docker, docker, services))
+		mux.HandleFunc("GET /api/logs", HandleAggregateLogs(docker, docker, docker, services))
 		mux.HandleFunc("GET /api/containers/{id}", HandleContainerInspect(docker))
 		mux.HandleFunc("GET /api/volumes/{name}", HandleVolumeInspect(docker))
 		mux.HandleFunc("GET /api/networks/{name}", HandleNetworkInspect(docker))
 	}
 	if system != nil {
-		mux.HandleFunc("GET /api/system/info", HandleSystemInfo(system))
+		mux.HandleFunc("GET /api/system/info", HandleSystemInfo(system, mode))
 		mux.HandleFunc("GET /api/system/disk-usage", HandleSystemDiskUsage(system))
 		mux.HandleFunc("GET /api/images", HandleImages(system))
 	}
 	if statsHistory != nil {
-		mux.HandleFunc("GET /api/stats/history", HandleStatsHistory(statsHistory))
+		var lister ContainerLister
+		if docker != nil {
+			lister = docker
+		}
+		mux.HandleFunc("GET /api/stats/history", HandleStatsHistory(statsHistory, lister))
 	}
 	if eventHistory != nil {
 		mux.HandleFunc("GET /api/events/recent", HandleRecentEvents(eventHistory))
