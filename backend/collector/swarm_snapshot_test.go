@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -428,6 +429,41 @@ func TestBuildServiceInfoCapsFailedTasks(t *testing.T) {
 		ids[ti.ID] = true
 	}
 	for _, id := range []string{"fd", "fe", "ff", "run"} {
+		if !ids[id] {
+			t.Errorf("expected task %s in %v", id, ids)
+		}
+	}
+	if info.Replicas.Running != 1 {
+		t.Errorf("running = %d", info.Replicas.Running)
+	}
+}
+
+func TestBuildServiceInfoCapsCompletedJobTasks(t *testing.T) {
+	svc := stackService("s", "st", "migrate", 1)
+	svc.Spec.Mode = swarm.ServiceMode{ReplicatedJob: &swarm.ReplicatedJob{}}
+	var tasks []swarm.Task
+	// Job tasks keep desired state "complete" once they have finished.
+	for i := 0; i < 50; i++ {
+		ct := task(fmt.Sprintf("c%02d", i), "s", "n1", i+1, swarm.TaskStateComplete, swarm.TaskStateComplete)
+		ct.Status.Timestamp = time.Unix(int64(1000+i), 0)
+		tasks = append(tasks, ct)
+	}
+	// Still running or waiting to: current work, always listed.
+	tasks = append(tasks,
+		task("run", "s", "n1", 51, swarm.TaskStateRunning, swarm.TaskStateComplete),
+		task("wait", "s", "", 52, swarm.TaskStatePending, swarm.TaskStateComplete),
+	)
+
+	info := buildServiceInfo(svc, tasks, map[string]string{"n1": "host"}, 1)
+	ids := map[string]bool{}
+	for _, ti := range info.Tasks {
+		ids[ti.ID] = true
+	}
+	if len(info.Tasks) != 2+maxCompletedTasks {
+		t.Fatalf("got %d tasks %v, want %d", len(info.Tasks), ids, 2+maxCompletedTasks)
+	}
+	// Active tasks and the most recent completions are kept.
+	for _, id := range []string{"run", "wait", "c47", "c48", "c49"} {
 		if !ids[id] {
 			t.Errorf("expected task %s in %v", id, ids)
 		}

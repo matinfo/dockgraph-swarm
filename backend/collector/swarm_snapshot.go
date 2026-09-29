@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"hash/fnv"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,12 @@ const (
 // service alongside its active tasks, so a crash-looping service doesn't
 // flood the node payload with its whole task history.
 const maxFailedTasks = 3
+
+// maxCompletedTasks caps how many recently completed job tasks are listed per
+// service. Job tasks keep desired state "complete" after they finish, and
+// swarm retains them, so a large or often rerun job would otherwise send its
+// whole completion history in every snapshot.
+const maxCompletedTasks = 3
 
 // swarmResources extends the local daemon resources with the cluster-wide
 // swarm objects visible from a manager node.
@@ -396,28 +403,31 @@ func buildServiceInfo(svc swarm.Service, tasks []swarm.Task, hostnames map[strin
 		info.UpdateStatus = string(svc.UpdateStatus.State)
 	}
 
-	var active, failed []swarm.Task
+	var active, completed, failed []swarm.Task
 	for _, t := range tasks {
 		switch {
-		case t.DesiredState != swarm.TaskStateShutdown && t.DesiredState != swarm.TaskStateRemove:
+		case t.DesiredState == swarm.TaskStateShutdown || t.DesiredState == swarm.TaskStateRemove:
+			if t.Status.State == swarm.TaskStateFailed || t.Status.State == swarm.TaskStateRejected {
+				failed = append(failed, t)
+			}
+		case t.Status.State == swarm.TaskStateComplete:
+			// A finished job task: history, not current work.
+			completed = append(completed, t)
+		default:
 			active = append(active, t)
 			if t.Status.State == swarm.TaskStateRunning {
 				info.Replicas.Running++
 			}
-		case t.Status.State == swarm.TaskStateFailed || t.Status.State == swarm.TaskStateRejected:
-			failed = append(failed, t)
 		}
 	}
 
 	info.Replicas.Desired = desiredReplicas(svc, eligibleNodes)
 
-	// Keep only the most recent failures.
-	sort.Slice(failed, func(i, j int) bool { return failed[i].Status.Timestamp.After(failed[j].Status.Timestamp) })
-	if len(failed) > maxFailedTasks {
-		failed = failed[:maxFailedTasks]
-	}
+	// Keep only the most recent history.
+	completed = mostRecentTasks(completed, maxCompletedTasks)
+	failed = mostRecentTasks(failed, maxFailedTasks)
 
-	for _, t := range append(active, failed...) {
+	for _, t := range slices.Concat(active, completed, failed) {
 		info.Tasks = append(info.Tasks, buildTaskInfo(t, hostnames))
 	}
 	sort.SliceStable(info.Tasks, func(i, j int) bool {
@@ -431,6 +441,15 @@ func buildServiceInfo(svc swarm.Service, tasks []swarm.Task, hostnames map[strin
 		return a.ID < b.ID
 	})
 	return info
+}
+
+// mostRecentTasks returns the n tasks with the latest status timestamps.
+func mostRecentTasks(tasks []swarm.Task, n int) []swarm.Task {
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Status.Timestamp.After(tasks[j].Status.Timestamp) })
+	if len(tasks) > n {
+		tasks = tasks[:n]
+	}
+	return tasks
 }
 
 // buildTaskInfo converts a swarm task into its wire representation.
