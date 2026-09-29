@@ -86,7 +86,8 @@ func (p *AgentProxy) transport() http.RoundTripper {
 // wrap returns a handler that serves {id} locally when the local daemon
 // knows the container, and otherwise proxies to the owning agent at
 // suffix (e.g. "/logs") under /agent/v1/containers/{id}. stream disables the
-// overall request deadline for long-lived responses.
+// overall request deadline and the server write deadline for long-lived
+// responses.
 func (p *AgentProxy) wrap(local http.HandlerFunc, inspector ContainerInspector, suffix string, stream bool) http.HandlerFunc {
 	if p == nil || p.Locator == nil {
 		return local
@@ -119,7 +120,9 @@ func (p *AgentProxy) wrap(local http.HandlerFunc, inspector ContainerInspector, 
 			return
 		}
 
-		if !stream {
+		if stream {
+			disableWriteDeadline(w)
+		} else {
 			ctx, cancel := context.WithTimeout(r.Context(), remoteRequestTimeout)
 			defer cancel()
 			r = r.WithContext(ctx)

@@ -306,6 +306,7 @@ func HandleAggregateLogs(lister ContainerLister, logger ContainerLogger, eventsS
 			http.Error(w, "streaming not supported", http.StatusInternalServerError)
 			return
 		}
+		disableWriteDeadline(w)
 		scope := newLogScope(r, services)
 		if scope.stack != "" && !validResourceName.MatchString(scope.stack) {
 			jsonError(w, "invalid stack", http.StatusBadRequest)

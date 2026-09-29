@@ -165,6 +165,8 @@ func handleLogsStream(kind string, open logOpener) http.HandlerFunc {
 			return
 		}
 
+		disableWriteDeadline(w)
+
 		// Flush headers immediately so the EventSource client sees the
 		// connection as open even when no log lines have arrived yet.
 		flusher.Flush()
@@ -276,6 +278,16 @@ func parseLogEntry(streamType, raw string) logEntry {
 		entry.Line = raw[idx+1:]
 	}
 	return entry
+}
+
+// disableWriteDeadline lifts the server's WriteTimeout for a long-lived SSE
+// response. http.Server.WriteTimeout is an absolute deadline from the start
+// of the request, so without this every log stream is cut after it expires
+// even while lines are flowing. Streams still end when the client
+// disconnects (request context). Writers that don't support deadlines, such
+// as test recorders, are left unchanged.
+func disableWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 
 // streamDockerLogs reads Docker's multiplexed log stream and writes SSE events.

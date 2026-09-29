@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
@@ -919,4 +921,59 @@ func TestNewestLinesBefore(t *testing.T) {
 	if len(got) != 3 || got[0].Line != "a2" || got[2].Line != "a3" {
 		t.Errorf("newest page = %+v", got)
 	}
+}
+
+// tickingLogger follows forever, emitting one log line per interval until
+// the request is cancelled.
+type tickingLogger struct{ interval time.Duration }
+
+func (l tickingLogger) ContainerLogs(ctx context.Context, _ string, _ containertypes.LogsOptions) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		t := time.NewTicker(l.interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if _, err := pw.Write(frame("2026-06-11T10:00:00.000000000Z tick")); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	return pr, nil
+}
+
+// A log stream must outlive http.Server.WriteTimeout, which is an absolute
+// deadline from the start of the request: without lifting it, the server
+// cuts every SSE stream once it expires, even while lines are flowing.
+func TestHandleContainerLogsOutlivesWriteTimeout(t *testing.T) {
+	const writeTimeout = 200 * time.Millisecond
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/containers/{id}/logs", HandleContainerLogs(tickingLogger{interval: 20 * time.Millisecond}))
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Config.WriteTimeout = writeTimeout
+	srv.Start()
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/containers/web/logs", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	start := time.Now()
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		if strings.HasPrefix(scanner.Text(), "data: ") && time.Since(start) > 4*writeTimeout {
+			return // still streaming well past the write deadline
+		}
+	}
+	t.Fatalf("stream ended after %v (write timeout %v): %v", time.Since(start), writeTimeout, scanner.Err())
 }
