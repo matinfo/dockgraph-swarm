@@ -35,11 +35,19 @@ services:
       DG_AGENT_PORT: "7801"
       DG_AGENT_TOKEN_FILE: "/run/secrets/dg_agent_token"
       # DG_SWARM_POLL_INTERVAL: "5s"
-      # DG_PASSWORD: ""              # Set a password for the web UI (recommended)
+      # Require a login for the web UI and WebSocket (recommended). Either
+      # inline, or from a Docker secret (create it first with
+      # `printf '%s' 'pass' | docker secret create dg_password -`, then
+      # uncomment the dg_password secret below and at the bottom of the file):
+      # DG_PASSWORD: ""
+      # DG_PASSWORD_FILE: "/run/secrets/dg_password"
+      # Keep 0.0.0.0 in swarm: 127.0.0.1 would cut the routing mesh off.
+      # DG_BIND_ADDR: "0.0.0.0"
       # Stack name = what you pass to `docker stack deploy`:
       # DG_COMPOSE_PATH: "shop=/stacks/shop.yml"
     secrets:
       - dg_agent_token
+      # - dg_password
     networks:
       - internal
     healthcheck:
@@ -113,3 +121,5 @@ networks:
 secrets:
   dg_agent_token:
     external: true
+  # dg_password:
+  #   external: true

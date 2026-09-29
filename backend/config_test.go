@@ -517,3 +517,64 @@ func TestLoadConfig_AgentToken(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DG_PASSWORD_FILE
+// ---------------------------------------------------------------------------
+
+func TestLoadConfig_PasswordFile(t *testing.T) {
+	dir := t.TempDir()
+	plainFile := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plainFile, []byte("from-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := auth.HashPassword("hashed-secret")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	hashFile := filepath.Join(dir, "hash")
+	if err := os.WriteFile(hashFile, []byte(hash+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		inline string
+		file   string
+		want   string // password expected to verify; "" = auth disabled
+	}{
+		{"unset", "", "", ""},
+		{"file_plaintext_trimmed", "", plainFile, "from-secret"},
+		{"file_prehashed", "", hashFile, "hashed-secret"},
+		{"inline_wins", "inline-pass", plainFile, "inline-pass"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t, "DG_AGENT_TOKEN", "DG_AGENT_TOKEN_FILE")
+			t.Setenv("DG_PASSWORD", tt.inline)
+			t.Setenv("DG_PASSWORD_FILE", tt.file)
+			got := LoadConfig().PasswordHash
+			if tt.want == "" {
+				if got != "" {
+					t.Fatalf("PasswordHash: got %q, want empty", got)
+				}
+				return
+			}
+			ok, err := auth.CheckPassword(tt.want, got)
+			if err != nil {
+				t.Fatalf("CheckPassword: %v", err)
+			}
+			if !ok {
+				t.Errorf("hash does not verify against %q", tt.want)
+			}
+		})
+	}
+}
+
+func TestReadSecretEnv_MissingFile(t *testing.T) {
+	t.Setenv("DG_TEST_SECRET", "")
+	t.Setenv("DG_TEST_SECRET_FILE", filepath.Join(t.TempDir(), "missing"))
+	if _, err := readSecretEnv("DG_TEST_SECRET"); err == nil {
+		t.Fatal("expected an error for an unreadable secret file")
+	}
+}

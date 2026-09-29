@@ -63,7 +63,7 @@ func main() {
 		fmt.Println("  DG_PORT            HTTP port (default: 7800)")
 		fmt.Println("  DG_POLL_INTERVAL   Docker API poll interval (default: 30s)")
 		fmt.Println("  DG_COMPOSE_PATH    Comma-separated compose/stack file paths, optionally name=/path (default: auto-detect)")
-		fmt.Println("  DG_PASSWORD        Password for UI/WebSocket access (default: disabled)")
+		fmt.Println("  DG_PASSWORD        Password for UI/WebSocket access (or DG_PASSWORD_FILE; default: disabled)")
 		fmt.Println("  DG_STATS_INTERVAL  Stats poll interval (default: 3s)")
 		fmt.Println("  DG_STATS_WORKERS   Max concurrent stats calls (default: 50)")
 		fmt.Println("  DG_MODE            auto | standalone | swarm | agent (default: auto)")

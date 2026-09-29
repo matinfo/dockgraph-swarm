@@ -113,6 +113,7 @@ environment:
 | `DG_POLL_INTERVAL` | `30s`           | Docker API polling interval                                                          |
 | `DG_COMPOSE_PATH`  | _(auto-detect)_ | Override: comma-separated list of compose/stack files or directories to scan; prefix an entry with `name=` (e.g. `shop=/stacks/shop.yml`) to set its project/stack name |
 | `DG_PASSWORD`      | _(disabled)_    | Password for UI and WebSocket access; when set, requires login to view the dashboard |
+| `DG_PASSWORD_FILE` | _(none)_        | File to read the password from (e.g. a Docker secret; plaintext or argon2id hash); `DG_PASSWORD` wins if both are set. The server refuses to start if the file is unreadable |
 | `DG_STATS_INTERVAL`| `3s`            | Container stats poll interval (Go duration)                                          |
 | `DG_STATS_WORKERS` | `50`            | Max concurrent stats API calls                                                       |
 | `DG_MODE`          | `auto`          | `auto`, `standalone`, `swarm` or `agent`. `auto` picks `swarm` on a swarm manager and `standalone` outside a swarm; it refuses to start on a swarm worker |
@@ -170,6 +171,16 @@ DockGraph requires access to the Docker daemon socket to read container, network
   environment:
     DG_PASSWORD: "your-secure-password"
   ```
+  To keep the password out of the environment, store it in a file (such as a Docker secret) and point `DG_PASSWORD_FILE` at it. Surrounding whitespace is trimmed, and the file may hold a plaintext password or an argon2id hash. The server refuses to start if the file can't be read, so a broken secret never disables authentication.
+  ```sh
+  printf '%s' 'your-secure-password' | docker secret create dg_password -
+  ```
+  ```yaml
+  environment:
+    DG_PASSWORD_FILE: "/run/secrets/dg_password"
+  secrets:
+    - dg_password
+  ```
   When `DG_PASSWORD` is not set, DockGraph runs without authentication (suitable for localhost or trusted networks).
 - **Bind to localhost** when running on a shared network or production host:
   ```yaml
@@ -183,7 +194,7 @@ DockGraph requires access to the Docker daemon socket to read container, network
   - Keep the agent port (`7801`) on the stack's internal overlay network. Never publish it; `stack.yml` does not.
   - The agent refuses to start without a token, and every agent request needs it as a bearer token. Use a long random value stored as a Docker secret (`dg_agent_token`), not an inline `DG_AGENT_TOKEN`.
   - Overlay traffic between nodes is unencrypted by default; enable `encrypted: "true"` on the internal network (see `stack.yml`) if nodes communicate over an untrusted network.
-  - Set `DG_PASSWORD` on the `server` service, since its published port is reachable on every node through the routing mesh.
+  - Set `DG_PASSWORD_FILE` (backed by a `dg_password` Docker secret, see `stack.yml`) or `DG_PASSWORD` on the `server` service, since its published port is reachable on every node through the routing mesh.
 - **Secret masking.** Environment values whose keys look like credentials (`PASSWORD`, `SECRET`, `KEY`, `TOKEN`, `AUTH`, …) are masked before leaving the server — for both running containers and parsed compose services — so they're never sent to the browser.
 
 ## How It Works

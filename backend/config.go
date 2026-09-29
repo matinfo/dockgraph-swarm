@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -102,7 +103,12 @@ func LoadConfig() Config {
 		}
 	}
 
-	if raw := os.Getenv("DG_PASSWORD"); raw != "" {
+	raw, err := readSecretEnv("DG_PASSWORD")
+	if err != nil {
+		// A misconfigured secret must never silently disable authentication.
+		log.Fatalf("%v", err)
+	}
+	if raw != "" {
 		if auth.IsHashedPassword(raw) {
 			if err := auth.ValidateHash(raw); err != nil {
 				log.Fatalf("DG_PASSWORD contains invalid hash: %v", err)
@@ -135,28 +141,39 @@ func parsePort(envKey, fallback string) string {
 	return v
 }
 
-// loadAgentToken returns the agent shared secret from DG_AGENT_TOKEN, or
-// from the file named by DG_AGENT_TOKEN_FILE (surrounding whitespace, such as
-// a trailing newline, is trimmed). The inline variable wins when both are set.
-// An unreadable file yields an empty token, which agent mode refuses.
-func loadAgentToken() string {
-	token := strings.TrimSpace(os.Getenv("DG_AGENT_TOKEN"))
-	path := strings.TrimSpace(os.Getenv("DG_AGENT_TOKEN_FILE"))
-	if token != "" {
+// readSecretEnv returns the value of the environment variable key, or the
+// contents of the file named by key+"_FILE" (surrounding whitespace, such as
+// the trailing newline of a Docker secret, is trimmed). The inline variable
+// wins when both are set. It fails only when the file is named but unreadable.
+func readSecretEnv(key string) (string, error) {
+	value := os.Getenv(key)
+	path := strings.TrimSpace(os.Getenv(key + "_FILE"))
+	if value != "" {
 		if path != "" {
-			log.Println("WARN  both DG_AGENT_TOKEN and DG_AGENT_TOKEN_FILE are set, using DG_AGENT_TOKEN")
+			log.Printf("WARN  both %s and %s_FILE are set, using %s", key, key, key)
 		}
-		return token
+		return value, nil
 	}
 	if path == "" {
-		return ""
+		return "", nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("WARN  cannot read DG_AGENT_TOKEN_FILE: %v", err)
+		return "", fmt.Errorf("cannot read %s_FILE: %w", key, err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// loadAgentToken returns the agent shared secret from DG_AGENT_TOKEN or
+// DG_AGENT_TOKEN_FILE (see readSecretEnv). An unreadable file yields an empty
+// token, which agent mode refuses.
+func loadAgentToken() string {
+	token, err := readSecretEnv("DG_AGENT_TOKEN")
+	if err != nil {
+		log.Printf("WARN  %v", err)
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	return strings.TrimSpace(token)
 }
 
 // parseDuration reads a duration from an environment variable with minimum enforcement.
