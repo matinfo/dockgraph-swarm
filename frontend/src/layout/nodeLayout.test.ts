@@ -28,7 +28,7 @@ function service(name: string, hosts: string[]): DGNode {
   const tasks: TaskInfo[] = hosts.map((h, i) => ({
     id: `${name}-${i}`, slot: i + 1, nodeHostname: h, state: 'running', desiredState: 'running',
   }));
-  return { id: `service:${name}`, type: 'service', name, status: 'running', service: { mode: 'replicated', tasks } };
+  return { id: `service:${name}`, type: 'service', name, status: 'running', service: { mode: 'replicated', replicas: { running: hosts.length, desired: hosts.length }, tasks } };
 }
 
 const byId = (nodes: RFNode[], id: string) => nodes.find((n) => n.id === id)!;
@@ -41,7 +41,7 @@ describe('layoutNodeGroups', () => {
   const web = service('web', ['m1', 'w1', 'w1', 'w9']);
   const pending: DGNode = {
     ...service('stuck', []),
-    service: { tasks: [{ id: 'p', slot: 1, state: 'pending', desiredState: 'running' }] },
+    service: { replicas: { running: 0, desired: 1 }, tasks: [{ id: 'p', slot: 1, state: 'pending', desiredState: 'running' }] },
   };
   const laid = layoutNodeGroups(toNodeGroupedFlowNodes([...managers, ...workers, web, pending], null));
 

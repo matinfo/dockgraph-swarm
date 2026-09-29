@@ -9,9 +9,9 @@ import {
   type OverlayLinkData,
 } from './swarmLinks';
 import { toNodeGroupedFlowNodes, roleGroupId } from './nodeTransform';
-import type { DGEdge, DGNode, TaskInfo } from '../types';
+import type { DGEdge, DGNode, SwarmNodeInfo, TaskInfo } from '../types';
 
-function swarmNode(name: string, role: 'manager' | 'worker', state = 'ready', availability = 'active'): DGNode {
+function swarmNode(name: string, role: 'manager' | 'worker', state = 'ready', availability: SwarmNodeInfo['availability'] = 'active'): DGNode {
   return {
     id: `swarmnode:${name}`, type: 'swarmnode', name, status: state,
     swarmNode: { id: `id-${name}`, role, leader: role === 'manager', availability, state },
