@@ -88,6 +88,29 @@ docker compose -f demo/compose-large.yml --profile testing up -d     # load-test
 
 > **Do not start this stack.** It exists only as a compose file for the backend to parse. To test, mount it as the compose file source and let DockGraph parse it — no containers need to be running.
 
+## Swarm Stacks
+
+Two stack files for [Docker Swarm](../README.md#docker-swarm) mode, deployed with `docker stack deploy`. They use overlay networks, replicas, named volumes, one global service and one external network, `demo_shared`, shared by both stacks.
+
+| Stack      | File                | Services | Networks                                  | Volumes | Global service  |
+| ---------- | ------------------- | -------- | ----------------------------------------- | ------- | --------------- |
+| **Small**  | `stack-small.yml`   | 6        | frontend, backend + `demo_shared`         | 1       | `log-shipper`   |
+| **Medium** | `stack-medium.yml`  | 14       | public, api, data, messaging + `demo_shared` | 3    | `node-exporter` |
+
+The external network must exist before deploying (the Make targets create it if missing):
+
+```bash
+docker network create -d overlay --attachable demo_shared
+
+docker stack deploy -c demo/stack-small.yml demo-small    # or: make demo-stack-small
+docker stack deploy -c demo/stack-medium.yml demo-medium  # or: make demo-stack-medium
+
+docker stack rm demo-small demo-medium                    # remove (volumes are kept)
+docker network rm demo_shared
+```
+
+Data services (postgres, redis, rabbitmq) are pinned to a manager so their named volumes stay on one node. Try `docker service scale demo-small_app=5` or `docker service update --image nginx:1.27-alpine demo-small_web` and watch the service nodes update.
+
 ## Resource Usage
 
 - Application services use `busybox` with `sleep infinity` — near-zero CPU and memory.

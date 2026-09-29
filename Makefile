@@ -1,5 +1,6 @@
 .PHONY: all build build-backend build-frontend test test-coverage lint lint-backend lint-frontend vet fmt dev docker docker-up docker-down ci tidy clean help \
-	demo demo-down demo-small demo-small-down demo-medium demo-medium-down demo-large demo-large-down
+	demo demo-down demo-small demo-small-down demo-medium demo-medium-down demo-large demo-large-down \
+	swarm-deploy swarm-down swarm-smoke demo-stack-small demo-stack-small-down demo-stack-medium demo-stack-medium-down
 
 GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null)
 VERSION ?= $(if $(GIT_SHA),dev-$(GIT_SHA),dev)
@@ -77,6 +78,31 @@ demo-large: ## Start large demo (~46 services)
 
 demo-large-down: ## Stop large demo and remove volumes
 	docker compose -f demo/compose-large.yml down -v
+
+# ── Docker Swarm ──────────────────────────────────────────────
+
+swarm-deploy: ## Deploy DockGraph to the swarm (needs the dg_agent_token secret)
+	docker stack deploy -c stack.yml dockgraph
+
+swarm-down: ## Remove the DockGraph swarm stack
+	docker stack rm dockgraph
+
+swarm-smoke: ## Swarm end-to-end smoke test (may init/leave a local swarm)
+	./test/swarm_smoke.sh --yes
+
+demo-stack-small: ## Deploy small swarm demo stack (creates demo_shared network)
+	docker network inspect demo_shared >/dev/null 2>&1 || docker network create -d overlay --attachable demo_shared
+	docker stack deploy -c demo/stack-small.yml demo-small
+
+demo-stack-small-down: ## Remove small swarm demo stack
+	docker stack rm demo-small
+
+demo-stack-medium: ## Deploy medium swarm demo stack (creates demo_shared network)
+	docker network inspect demo_shared >/dev/null 2>&1 || docker network create -d overlay --attachable demo_shared
+	docker stack deploy -c demo/stack-medium.yml demo-medium
+
+demo-stack-medium-down: ## Remove medium swarm demo stack
+	docker stack rm demo-medium
 
 # ── Cleanup ───────────────────────────────────────────────────
 

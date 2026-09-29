@@ -111,10 +111,55 @@ environment:
 | `DG_BIND_ADDR`     | `0.0.0.0`       | Listen address (`127.0.0.1` to restrict to localhost)                                |
 | `DG_PORT`          | `7800`          | HTTP listen port                                                                     |
 | `DG_POLL_INTERVAL` | `30s`           | Docker API polling interval                                                          |
-| `DG_COMPOSE_PATH`  | _(auto-detect)_ | Override: comma-separated list of compose files or directories to scan               |
+| `DG_COMPOSE_PATH`  | _(auto-detect)_ | Override: comma-separated list of compose/stack files or directories to scan; prefix an entry with `name=` (e.g. `shop=/stacks/shop.yml`) to set its project/stack name |
 | `DG_PASSWORD`      | _(disabled)_    | Password for UI and WebSocket access; when set, requires login to view the dashboard |
 | `DG_STATS_INTERVAL`| `3s`            | Container stats poll interval (Go duration)                                          |
 | `DG_STATS_WORKERS` | `50`            | Max concurrent stats API calls                                                       |
+| `DG_MODE`          | `auto`          | `auto`, `standalone`, `swarm` or `agent`. `auto` picks `swarm` on a swarm manager and `standalone` outside a swarm; it refuses to start on a swarm worker |
+| `DG_SWARM_POLL_INTERVAL` | `5s`      | Swarm task poll interval (Go duration, min `1s`)                                     |
+| `DG_AGENT_PORT`    | `7801`          | Per-node agent HTTP port (agents listen on it, the server dials it)                 |
+| `DG_AGENT_ADDR`    | `tasks.agent`   | DNS name resolving to every agent task, optionally `host:port`                       |
+| `DG_AGENT_TOKEN`   | _(none)_        | Shared bearer secret between server and agents; required in `agent` mode. Without it the swarm server runs without agents |
+| `DG_AGENT_TOKEN_FILE` | _(none)_     | File to read the agent token from (e.g. a Docker secret); `DG_AGENT_TOKEN` wins if both are set |
+
+## Docker Swarm
+
+On a swarm manager, DockGraph shows **services** (with replica counts, tasks and the nodes they run on) grouped by **stack**, instead of individual containers. Use the stack selector to scope the graph, logs and stats to one stack.
+
+[`stack.yml`](stack.yml) deploys two services:
+
+- **`server`** — the UI and API, pinned to a manager (`node.role == manager`), published on port 7800 through the routing mesh.
+- **`agent`** — a global service (one task per node) that exposes that node's container stats, inspect and logs to the server. It publishes no port and is only reachable on the stack's internal overlay network.
+
+```bash
+# On a manager: create the shared agent token once
+openssl rand -hex 32 | docker secret create dg_agent_token -
+
+# Deploy (or: make swarm-deploy)
+docker stack deploy -c stack.yml dockgraph
+
+# Open http://<any-node>:7800
+```
+
+Both services carry the `dockgraph.self=true` label (as a service label under `deploy.labels` and as a container label) so DockGraph hides itself. `DG_AGENT_ADDR` defaults to `tasks.agent`, which resolves to every agent task inside the stack; change it only if you rename the `agent` service.
+
+To show services from stack files that are not deployed yet, mount them into the `server` service (the path must exist on the manager it runs on) and name each file after its stack, as you would with `docker stack deploy -c file <name>`:
+
+```yaml
+    volumes:
+      - /opt/stacks/shop.yml:/stacks/shop.yml:ro
+    environment:
+      DG_COMPOSE_PATH: "shop=/stacks/shop.yml"
+```
+
+Demo stacks for swarm are in [`demo/stack-small.yml`](demo/stack-small.yml) and [`demo/stack-medium.yml`](demo/stack-medium.yml) (see [`demo/README.md`](demo/README.md)).
+
+### Remote task limits
+
+- **Without agents** (no `DG_AGENT_TOKEN`), topology, replica counts and service logs still cover the whole cluster (they come from the manager's swarm API), but container stats, container inspect and container logs are only available for tasks on the server's own node.
+- **With agents**, the server resolves `tasks.agent` periodically, polls each agent for stats and proxies container inspect/logs to the node running the container. A node whose agent is down or unreachable simply has no stats until it comes back.
+- Agents need the same token as the server; a mismatched token is rejected and that node's data is missing.
+- Running the standalone image on a swarm worker is refused in `auto` mode; set `DG_MODE=agent` there (or `DG_MODE=standalone` for a local-only view).
 
 ## Security Considerations
 
@@ -134,6 +179,11 @@ DockGraph requires access to the Docker daemon socket to read container, network
 - **Use a reverse proxy** (nginx, Caddy, Traefik) for TLS termination if exposing DockGraph beyond your local network. DockGraph serves plain HTTP — the reverse proxy handles HTTPS.
 - **Docker socket access** is read-only (`:ro`), but any process that can read the socket can inspect all Docker resources on the host. Run DockGraph in a network-isolated environment or behind a firewall.
 - **Read-only API.** DockGraph cannot start, stop, or modify containers. It only observes topology.
+- **Docker Swarm.** In a swarm, the Docker socket is mounted on **every node** (the agent is a global service), and access to the socket is equivalent to root on that host — even mounted `:ro`, since the Docker API is not restricted by the mount mode. Treat the `dockgraph` stack as privileged on the whole cluster:
+  - Keep the agent port (`7801`) on the stack's internal overlay network. Never publish it; `stack.yml` does not.
+  - The agent refuses to start without a token, and every agent request needs it as a bearer token. Use a long random value stored as a Docker secret (`dg_agent_token`), not an inline `DG_AGENT_TOKEN`.
+  - Overlay traffic between nodes is unencrypted by default; enable `encrypted: "true"` on the internal network (see `stack.yml`) if nodes communicate over an untrusted network.
+  - Set `DG_PASSWORD` on the `server` service, since its published port is reachable on every node through the routing mesh.
 - **Secret masking.** Environment values whose keys look like credentials (`PASSWORD`, `SECRET`, `KEY`, `TOKEN`, `AUTH`, …) are masked before leaving the server — for both running containers and parsed compose services — so they're never sent to the browser.
 
 ## How It Works
