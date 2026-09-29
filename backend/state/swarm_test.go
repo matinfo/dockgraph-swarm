@@ -13,17 +13,21 @@ func TestMergeStackGhostWithLiveService(t *testing.T) {
 
 	ghost := collector.GraphSnapshot{
 		Nodes: []collector.Node{
-			{ID: "service:shop_web", Type: "service", Name: "shop_web", Status: "not_running", Source: "shop.yml", Stack: "shop",
+			{
+				ID: "service:shop_web", Type: "service", Name: "shop_web", Status: "not_running", Source: "shop.yml", Stack: "shop",
 				NetworkID: "network:shop_back",
-				Service:   &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Desired: 3}}},
+				Service:   &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Desired: 3}},
+			},
 			{ID: "service:shop_worker", Type: "service", Name: "shop_worker", Status: "not_running", Source: "shop.yml", Stack: "shop"},
 			{ID: "network:shop_back", Type: "network", Name: "shop_back", Status: "not_running", Source: "shop.yml", Stack: "shop"},
 		},
 	}
 	live := collector.GraphSnapshot{
 		Nodes: []collector.Node{
-			{ID: "service:shop_web", Type: "service", Name: "shop_web", Status: "running", Stack: "shop",
-				Service: &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Running: 3, Desired: 3}}},
+			{
+				ID: "service:shop_web", Type: "service", Name: "shop_web", Status: "running", Stack: "shop",
+				Service: &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Running: 3, Desired: 3}},
+			},
 			{ID: "network:shop_back", Type: "network", Name: "shop_back", Driver: "overlay", Stack: "shop"},
 		},
 	}
@@ -59,13 +63,19 @@ func TestMergeStackGhostWithLiveService(t *testing.T) {
 }
 
 func TestNodeEqualSwarmFields(t *testing.T) {
-	base := collector.Node{ID: "service:a", Type: "service", Name: "a", Stack: "s",
-		Service: &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Running: 1, Desired: 2},
-			Tasks: []collector.TaskInfo{{ID: "t1", State: "running"}}}}
+	base := collector.Node{
+		ID: "service:a", Type: "service", Name: "a", Stack: "s",
+		Service: &collector.ServiceInfo{
+			Mode: "replicated", Replicas: collector.ReplicaCount{Running: 1, Desired: 2},
+			Tasks: []collector.TaskInfo{{ID: "t1", State: "running"}},
+		},
+	}
 
 	same := base
-	same.Service = &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Running: 1, Desired: 2},
-		Tasks: []collector.TaskInfo{{ID: "t1", State: "running"}}}
+	same.Service = &collector.ServiceInfo{
+		Mode: "replicated", Replicas: collector.ReplicaCount{Running: 1, Desired: 2},
+		Tasks: []collector.TaskInfo{{ID: "t1", State: "running"}},
+	}
 	if !nodeEqual(base, same) {
 		t.Error("equal service info should compare equal")
 	}
@@ -76,12 +86,16 @@ func TestNodeEqualSwarmFields(t *testing.T) {
 	}{
 		{"stack", func(n *collector.Node) { n.Stack = "other" }},
 		{"replicas", func(n *collector.Node) {
-			n.Service = &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Running: 2, Desired: 2},
-				Tasks: []collector.TaskInfo{{ID: "t1", State: "running"}}}
+			n.Service = &collector.ServiceInfo{
+				Mode: "replicated", Replicas: collector.ReplicaCount{Running: 2, Desired: 2},
+				Tasks: []collector.TaskInfo{{ID: "t1", State: "running"}},
+			}
 		}},
 		{"task state", func(n *collector.Node) {
-			n.Service = &collector.ServiceInfo{Mode: "replicated", Replicas: collector.ReplicaCount{Running: 1, Desired: 2},
-				Tasks: []collector.TaskInfo{{ID: "t1", State: "failed"}}}
+			n.Service = &collector.ServiceInfo{
+				Mode: "replicated", Replicas: collector.ReplicaCount{Running: 1, Desired: 2},
+				Tasks: []collector.TaskInfo{{ID: "t1", State: "failed"}},
+			}
 		}},
 		{"service removed", func(n *collector.Node) { n.Service = nil }},
 	}

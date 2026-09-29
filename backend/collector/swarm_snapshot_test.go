@@ -602,8 +602,11 @@ func TestSelfServicesIsSelfEvent(t *testing.T) {
 		return events.Message{Type: events.ServiceEventType, Actor: events.Actor{ID: id}}
 	}
 
-	if !self.IsSelfEvent(ctx, svcEvent("dg")) || !self.IsSelfEvent(ctx, svcEvent("dg")) {
-		t.Error("dockgraph service event not filtered")
+	// Query twice: the second call must hit the cache.
+	for range 2 {
+		if !self.IsSelfEvent(ctx, svcEvent("dg")) {
+			t.Error("dockgraph service event not filtered")
+		}
 	}
 	if calls != 1 {
 		t.Errorf("expected cached lookup, got %d inspect calls", calls)

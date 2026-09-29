@@ -2,8 +2,8 @@
 # 14 services across 4 overlay networks plus the shared external network.
 #
 #   docker network create -d overlay --attachable demo_shared   # once
-#   docker stack deploy -c demo/stack-medium.yml demo-medium
-#   docker stack rm demo-medium
+#   docker stack deploy -c demo/stack-medium.yml swarm-medium
+#   docker stack rm swarm-medium
 
 networks:
   public:

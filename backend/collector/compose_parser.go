@@ -33,15 +33,15 @@ type composeNaming struct {
 }
 
 func (n composeNaming) network(name string) string {
-	if real := n.networks[name]; real != "" {
-		return real
+	if resolved := n.networks[name]; resolved != "" {
+		return resolved
 	}
 	return n.project + "_" + name
 }
 
 func (n composeNaming) volume(name string) string {
-	if real := n.volumes[name]; real != "" {
-		return real
+	if resolved := n.volumes[name]; resolved != "" {
+		return resolved
 	}
 	return n.project + "_" + name
 }

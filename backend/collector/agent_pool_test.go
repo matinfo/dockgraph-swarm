@@ -300,8 +300,10 @@ func TestStatsCollectorMergesRemoteWithoutDoubleCounting(t *testing.T) {
 func TestBuildStatsSnapshotAggregates(t *testing.T) {
 	snap := BuildStatsSnapshot([]ContainerSample{
 		taskSample("a", "svc.1.x", "svc", "x", 10, 100),
-		{ID: "b", Name: "svc.2.y", Labels: map[string]string{swarmServiceNameLabel: "svc"},
-			Stats: ContainerStats{CPUPercent: 5, CPUThrottled: 40, MemUsage: 50, MemLimit: 1000, NetRx: 7, PIDs: 3}},
+		{
+			ID: "b", Name: "svc.2.y", Labels: map[string]string{swarmServiceNameLabel: "svc"},
+			Stats: ContainerStats{CPUPercent: 5, CPUThrottled: 40, MemUsage: 50, MemLimit: 1000, NetRx: 7, PIDs: 3},
+		},
 		{ID: "c", Name: "standalone", Stats: ContainerStats{CPUPercent: 1}},
 		// A container named like a service keeps its own entry.
 		{ID: "d", Name: "other", Stats: ContainerStats{CPUPercent: 2}},

@@ -49,12 +49,18 @@ func swarmStub() *stubDockerAPI {
 		logger:   &stubContainerLogger{},
 		services: []swarm.Service{web, db, blog},
 		tasks: []swarm.Task{
-			{ID: "t1", ServiceID: "svc-web", NodeID: "n1", Slot: 1, DesiredState: swarm.TaskStateRunning,
-				Status: swarm.TaskStatus{State: swarm.TaskStateRunning}},
-			{ID: "t2", ServiceID: "svc-web", NodeID: "n1", Slot: 2, DesiredState: swarm.TaskStateRunning,
-				Status: swarm.TaskStatus{State: swarm.TaskStateStarting}},
-			{ID: "t9", ServiceID: "svc-blog", NodeID: "n1", Slot: 1, DesiredState: swarm.TaskStateRunning,
-				Status: swarm.TaskStatus{State: swarm.TaskStateRunning}},
+			{
+				ID: "t1", ServiceID: "svc-web", NodeID: "n1", Slot: 1, DesiredState: swarm.TaskStateRunning,
+				Status: swarm.TaskStatus{State: swarm.TaskStateRunning},
+			},
+			{
+				ID: "t2", ServiceID: "svc-web", NodeID: "n1", Slot: 2, DesiredState: swarm.TaskStateRunning,
+				Status: swarm.TaskStatus{State: swarm.TaskStateStarting},
+			},
+			{
+				ID: "t9", ServiceID: "svc-blog", NodeID: "n1", Slot: 1, DesiredState: swarm.TaskStateRunning,
+				Status: swarm.TaskStatus{State: swarm.TaskStateRunning},
+			},
 		},
 		nodes:    []swarm.Node{node},
 		networks: map[string]string{"net1": "shop_front"},

@@ -1,6 +1,6 @@
 # Demo Stacks
 
-Four compose stacks of increasing complexity for showcasing DockGraph at different scales.
+Four compose stacks of increasing complexity for showcasing DockGraph at different scales, plus two [Docker Swarm](#swarm-stacks) stacks for swarm mode.
 
 | Stack      | File                 | Services | Networks | Volumes | Description                                                 |
 | ---------- | -------------------- | -------- | -------- | ------- | ----------------------------------------------------------- |
@@ -23,12 +23,18 @@ make demo-small-down     # Stop small demo and remove volumes
 make demo-medium-down    # Stop medium demo and remove volumes
 make demo-large-down     # Stop large demo and remove volumes
 make demo-down           # Stop all demos and remove volumes
+
+make demo-swarm          # Deploy both swarm stacks (needs a swarm manager)
+make demo-swarm-down     # Remove both swarm stacks
 ```
+
+`demo/start.sh` does the same without Make: `./demo/start.sh` starts the three compose demos, `./demo/start.sh swarm` deploys the two swarm stacks.
 
 Then start DockGraph to visualize:
 
 ```bash
-docker compose up -d
+docker compose up -d     # compose demos
+make swarm-deploy        # swarm demos (see ../README.md#docker-swarm)
 # Open http://localhost:7800
 ```
 
@@ -95,21 +101,28 @@ Two stack files for [Docker Swarm](../README.md#docker-swarm) mode, deployed wit
 | Stack      | File                | Services | Networks                                  | Volumes | Global service  |
 | ---------- | ------------------- | -------- | ----------------------------------------- | ------- | --------------- |
 | **Small**  | `stack-small.yml`   | 6        | frontend, backend + `demo_shared`         | 1       | `log-shipper`   |
-| **Medium** | `stack-medium.yml`  | 14       | public, api, data, messaging + `demo_shared` | 3    | `node-exporter` |
+| **Medium** | `stack-medium.yml`  | 14       | public, api, data, messaging + `demo_shared` | 3       | `node-exporter` |
 
-The external network must exist before deploying (the Make targets create it if missing):
+Stacks are deployed as `swarm-small` and `swarm-medium`, so they don't merge with the compose demos (`demo-small`, `demo-medium`) in the stack selector. The small stack publishes port **8071** (the compose small demo uses 8070), so both can run side by side.
+
+The external network must exist before deploying (`start.sh swarm` and the Make targets create it if missing):
 
 ```bash
+./demo/start.sh swarm                                      # or: make demo-swarm
+
+# or step by step:
 docker network create -d overlay --attachable demo_shared
+docker stack deploy -c demo/stack-small.yml swarm-small    # or: make demo-stack-small
+docker stack deploy -c demo/stack-medium.yml swarm-medium  # or: make demo-stack-medium
 
-docker stack deploy -c demo/stack-small.yml demo-small    # or: make demo-stack-small
-docker stack deploy -c demo/stack-medium.yml demo-medium  # or: make demo-stack-medium
-
-docker stack rm demo-small demo-medium                    # remove (volumes are kept)
+docker stack rm swarm-small swarm-medium                   # remove (volumes are kept)
 docker network rm demo_shared
+docker volume rm $(docker volume ls -q --filter name=swarm-)  # optional: drop data
 ```
 
-Data services (postgres, redis, rabbitmq) are pinned to a manager so their named volumes stay on one node. Try `docker service scale demo-small_app=5` or `docker service update --image nginx:1.27-alpine demo-small_web` and watch the service nodes update.
+Once DockGraph runs in swarm mode, pick `swarm-small` or `swarm-medium` in the header stack selector (or open `http://localhost:7800/?stack=swarm-small`) to view one stack on its own. Graph, table, dashboard and logs are all scoped to it.
+
+Data services (postgres, redis, rabbitmq) are pinned to a manager so their named volumes stay on one node. Try `docker service scale swarm-small_app=5` or `docker service update --image nginx:1.27-alpine swarm-small_web` and watch the service nodes update.
 
 ## Resource Usage
 
@@ -130,4 +143,10 @@ docker compose -f demo/compose-medium.yml up -d --scale email-worker=3
 
 # Take down a tier in the large stack
 docker compose -f demo/compose-large.yml stop kafka zookeeper
+
+# Swarm: scale a service and watch the replica badge change
+docker service scale swarm-small_app=5
+
+# Swarm: scale to zero and watch the service turn "stopped"
+docker service scale swarm-medium_order-worker=0
 ```
