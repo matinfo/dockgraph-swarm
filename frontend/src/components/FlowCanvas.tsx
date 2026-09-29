@@ -309,13 +309,24 @@ export function FlowCanvas({
     (ref: string) => handleInfoClickWithSelect(resolveNodeRef(dgNodes, ref)),
     [dgNodes, handleInfoClickWithSelect],
   );
-  const handleSelectStack = useCallback(
-    (stack: string) => {
+  // Every stack change (header selector or dashboard) closes the detail
+  // panel: the resource it shows may be out of the new scope, and it would
+  // otherwise keep fetching that resource's details and logs.
+  const changeStack = useCallback(
+    (stack: string | null) => {
+      if (stack === selectedStack) return;
       closeDetail();
       onSelectStack?.(stack);
+    },
+    [closeDetail, onSelectStack, selectedStack],
+  );
+  // Dashboard drill-down: scope to the stack and show it in the graph.
+  const handleSelectStack = useCallback(
+    (stack: string) => {
+      changeStack(stack);
       setActiveView("graph");
     },
-    [closeDetail, onSelectStack],
+    [changeStack],
   );
 
   // Search & filter.
@@ -564,7 +575,7 @@ export function FlowCanvas({
           />
           <ViewTabs activeView={activeView} onViewChange={setActiveView} />
           {onSelectStack && (
-            <StackSelector stacks={stacks} selected={selectedStack} onSelect={onSelectStack} />
+            <StackSelector stacks={stacks} selected={selectedStack} onSelect={changeStack} />
           )}
           {activeView === "graph" && hasSwarmNodes && (
             <GroupByToggle value={groupBy} onChange={setGroupBy} />
