@@ -80,4 +80,74 @@ describe('StackSelector', () => {
     );
     expect(container.innerHTML).toBe('');
   });
+
+  describe('keyboard', () => {
+    // Options in order: All stacks, blog, shop, Standalone.
+    const highlighted = () => {
+      const list = screen.getByRole('listbox');
+      const id = list.getAttribute('aria-activedescendant');
+      return id ? document.getElementById(id)?.textContent : undefined;
+    };
+
+    it('opens with Arrow Down, focuses the list and highlights the selected stack', () => {
+      renderSelector({ selected: 'shop' });
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Stack' }), { key: 'ArrowDown' });
+      const list = screen.getByRole('listbox');
+      expect(document.activeElement).toBe(list);
+      expect(highlighted()).toContain('shop');
+    });
+
+    it('moves with the arrow keys and selects with Enter, returning focus to the trigger', () => {
+      const onSelect = renderSelector();
+      const trigger = screen.getByRole('button', { name: 'Stack' });
+      fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+      const list = screen.getByRole('listbox');
+      fireEvent.keyDown(list, { key: 'ArrowDown' });
+      fireEvent.keyDown(list, { key: 'ArrowDown' });
+      fireEvent.keyDown(list, { key: 'ArrowUp' });
+      expect(highlighted()).toContain('blog');
+      fireEvent.keyDown(list, { key: 'Enter' });
+      expect(onSelect).toHaveBeenCalledWith('blog');
+      expect(screen.queryByRole('listbox')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it('jumps with Home and End, stays in bounds, and selects with Space', () => {
+      const onSelect = renderSelector({ selected: 'blog' });
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Stack' }), { key: 'ArrowDown' });
+      const list = screen.getByRole('listbox');
+      fireEvent.keyDown(list, { key: 'End' });
+      fireEvent.keyDown(list, { key: 'ArrowDown' }); // already last
+      expect(highlighted()).toContain('Standalone');
+      fireEvent.keyDown(list, { key: 'Home' });
+      fireEvent.keyDown(list, { key: 'ArrowUp' }); // already first
+      expect(highlighted()).toContain('All stacks');
+      fireEvent.keyDown(list, { key: ' ' });
+      expect(onSelect).toHaveBeenCalledWith(null);
+    });
+
+    it('closes with Escape without selecting and refocuses the trigger', () => {
+      const onSelect = renderSelector();
+      const trigger = screen.getByRole('button', { name: 'Stack' });
+      fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+      expect(screen.queryByRole('listbox')).toBeNull();
+      expect(onSelect).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it('closes on Tab without selecting', () => {
+      const onSelect = renderSelector();
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Stack' }), { key: 'ArrowDown' });
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Tab' });
+      expect(screen.queryByRole('listbox')).toBeNull();
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('opening by click also puts focus in the list', () => {
+      renderSelector();
+      fireEvent.click(screen.getByRole('button', { name: 'Stack' }));
+      expect(document.activeElement).toBe(screen.getByRole('listbox'));
+    });
+  });
 });
