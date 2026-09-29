@@ -162,6 +162,11 @@ func isServiceSeries(name string, services map[string]bool) bool {
 	if services[name] {
 		return true
 	}
-	svc, rest, ok := strings.Cut(name, ".")
-	return ok && services[svc] && taskSuffix.MatchString(rest)
+	for svc := range services {
+		prefix := svc + "."
+		if strings.HasPrefix(name, prefix) && taskSuffix.MatchString(strings.TrimPrefix(name, prefix)) {
+			return true
+		}
+	}
+	return false
 }
