@@ -39,7 +39,7 @@ describe('SwarmNodeGroup', () => {
   it('shows hostname, leader badge, task count and resource bars', () => {
     renderGroup({ stats });
     expect(screen.getByText('mgr')).toBeDefined();
-    expect(screen.getByTestId('role-badge').textContent).toBe('mgr ★');
+    expect(screen.getByTestId('role-badge').textContent).toBe('manager ★');
     expect(screen.getByTestId('task-count').textContent).toBe('3 tasks');
     expect(screen.getByText('CPU')).toBeDefined();
     expect(screen.getByText('50%')).toBeDefined();
@@ -51,7 +51,7 @@ describe('SwarmNodeGroup', () => {
     renderGroup({
       dgNode: { ...mgr, swarmNode: { ...mgr.swarmNode!, role: 'worker', leader: false, availability: 'drain' } },
     });
-    expect(screen.getByTestId('role-badge').textContent).toBe('wkr');
+    expect(screen.getByTestId('role-badge').textContent).toBe('worker');
     expect(screen.getByTestId('availability-chip').textContent).toBe('drain');
     expect(screen.getByTestId('no-agent').textContent).toContain('no agent');
   });

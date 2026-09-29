@@ -118,7 +118,7 @@ export const SwarmNodeGroup = memo(function SwarmNodeGroup({ data }: NodeProps) 
           >
             {dgNode.name}
           </span>
-          <SwarmRoleBadge info={info} compact />
+          <SwarmRoleBadge info={info} />
           {!unassigned && <SwarmStateChip state={state} />}
           <SwarmAvailabilityChip info={info} />
           <span style={{ flex: 1 }} />

@@ -16,11 +16,8 @@ const chip: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-/** Short role labels for tight headers, so the hostname keeps its room. */
-const COMPACT_ROLE = { manager: 'mgr', worker: 'wkr' } as const;
-
-/** "manager ★" (leader) / "manager" / "worker" chip; `compact` shows "mgr ★" / "wkr". */
-export const SwarmRoleBadge = memo(function SwarmRoleBadge({ info, compact = false }: { info: SwarmNodeInfo | undefined; compact?: boolean }) {
+/** "manager ★" (leader) / "manager" / "worker" chip. */
+export const SwarmRoleBadge = memo(function SwarmRoleBadge({ info }: { info: SwarmNodeInfo | undefined }) {
   const { theme } = useTheme();
   if (!info) return null;
   const manager = info.role === 'manager';
@@ -36,7 +33,7 @@ export const SwarmRoleBadge = memo(function SwarmRoleBadge({ info, compact = fal
         background: manager ? `${color}1f` : 'transparent',
       }}
     >
-      {compact ? COMPACT_ROLE[manager ? 'manager' : 'worker'] : info.role}{info.leader ? ' ★' : ''}
+      {info.role}{info.leader ? ' ★' : ''}
     </span>
   );
 });
