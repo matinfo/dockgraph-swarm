@@ -91,15 +91,20 @@ export function resolveConnectedElements(
     } else {
       // Single node: highlight directly connected edges and opposite endpoints.
       connectedNodeIds.add(selection.id);
-      // A per-node service card also lights the service's cards on other nodes.
+      // A per-node service card also lights the service's cards on other
+      // nodes, and the edges (swarm links) leaving any of them.
+      const origins = new Set([selection.id]);
       const serviceId = serviceIdOf(selectedNode);
       if (serviceId) {
         for (const n of nodes) {
-          if (serviceIdOf(n) === serviceId) connectedNodeIds.add(n.id);
+          if (serviceIdOf(n) === serviceId) {
+            connectedNodeIds.add(n.id);
+            origins.add(n.id);
+          }
         }
       }
       for (const e of edges) {
-        if (e.source === selection.id || e.target === selection.id) {
+        if (origins.has(e.source) || origins.has(e.target)) {
           connectedEdgeIds.add(e.id);
           connectedNodeIds.add(e.source);
           connectedNodeIds.add(e.target);

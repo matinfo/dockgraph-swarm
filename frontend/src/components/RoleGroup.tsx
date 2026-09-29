@@ -69,12 +69,12 @@ export const RoleGroup = memo(function RoleGroup({ data }: NodeProps) {
           aria-hidden="true"
           style={{ width: 6, height: 6, borderRadius: '50%', background: color, flex: '0 0 auto' }}
         />
-        <span>{title} · {nodeCount}</span>
+        <span>{title}</span>
         <span
           data-testid="role-group-summary"
           style={{ color: theme.nodeSubtext, fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}
         >
-          {plural(taskCount, 'task')}
+          {plural(nodeCount, 'node')} · {plural(taskCount, 'task')}
         </span>
       </div>
     </div>

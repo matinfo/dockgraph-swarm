@@ -11,6 +11,8 @@ import {
   type Edge as RFEdge,
 } from "@xyflow/react";
 import { ANIMATION_NODE_LIMIT, DETAIL_PANEL_WIDTH, Z } from "../utils/constants";
+import { SWARM_LINK_EDGE_TYPE, controlLinkEdge, overlayLinkEdges } from "../utils/swarmLinks";
+import { serviceIdOf, type SelectionState } from "../utils/selectionGraph";
 
 import { ContainerNode } from "./ContainerNode";
 import { ServiceNode } from "./ServiceNode";
@@ -22,6 +24,7 @@ import { NodeServiceCard } from "./NodeServiceCard";
 import { RoleGroup } from "./RoleGroup";
 import { VolumeNode } from "./VolumeNode";
 import { ElkEdge } from "./ElkEdge";
+import { SwarmLinkEdge } from "./SwarmLinkEdge";
 import { CanvasEdgeLayer, type CanvasEdgeLayerHandle } from "./CanvasEdgeLayer";
 import { ThemeToggle } from "./ThemeToggle";
 import { Brand } from "./Brand";
@@ -117,6 +120,7 @@ const nodeTypes = {
 
 const edgeTypes = {
   elk: ElkEdge,
+  [SWARM_LINK_EDGE_TYPE]: SwarmLinkEdge,
 };
 
 interface FlowCanvasProps {
@@ -342,11 +346,30 @@ export function FlowCanvas({
     [closeDetail, clearAll],
   );
 
+  // Per-node view links: the Managers → Workers control link always, plus
+  // overlay links from a selected service card to its network peers.
+  const controlLink = useMemo(
+    () => (effectiveGroupBy === "node" ? controlLinkEdge(dgNodes) : null),
+    [effectiveGroupBy, dgNodes],
+  );
+  const linkEdgesFor = useCallback(
+    (selection: SelectionState | null): RFEdge[] => {
+      if (effectiveGroupBy !== "node") return [];
+      const links = controlLink ? [controlLink] : [];
+      const selected = selection?.type === "node" ? nodes.find((n) => n.id === selection.id) : undefined;
+      const serviceId = serviceIdOf(selected);
+      if (serviceId) links.push(...overlayLinkEdges(dgNodes, dgEdges, nodes, serviceId));
+      return links;
+    },
+    [effectiveGroupBy, controlLink, nodes, dgNodes, dgEdges],
+  );
+
   const {
     styledNodes,
     styledEdges,
     canvasEdges,
     svgEdges,
+    linkEdges,
     onNodeClick,
     onEdgeClick,
     onPaneClick,
@@ -357,8 +380,17 @@ export function FlowCanvas({
     edges,
     largeGraph,
     search.matchingNodeIds,
+    linkEdgesFor,
   );
   useEffect(() => { selectNodeRef.current = selectNode; }, [selectNode]);
+  // Swarm links need live node positions, so they are always SVG edges.
+  const displayedEdges = useMemo(
+    () => {
+      const base = largeGraph ? svgEdges : styledEdges;
+      return linkEdges.length > 0 ? [...base, ...linkEdges] : base;
+    },
+    [largeGraph, svgEdges, styledEdges, linkEdges],
+  );
 
   // Canvas edge hit-test helper — returns the edge if hit, null otherwise.
   const canvasEdgeHit = useCallback(
@@ -617,7 +649,7 @@ export function FlowCanvas({
 
       <ReactFlow
         nodes={styledNodes}
-        edges={largeGraph ? svgEdges : styledEdges}
+        edges={displayedEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={largeGraph ? handleNodeClick : onNodeClick}

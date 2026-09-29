@@ -39,7 +39,7 @@ describe('SwarmNodeGroup', () => {
   it('shows hostname, leader badge, task count and resource bars', () => {
     renderGroup({ stats });
     expect(screen.getByText('mgr')).toBeDefined();
-    expect(screen.getByTestId('role-badge').textContent).toBe('manager ★');
+    expect(screen.getByTestId('role-badge').textContent).toBe('mgr ★');
     expect(screen.getByTestId('task-count').textContent).toBe('3 tasks');
     expect(screen.getByText('CPU')).toBeDefined();
     expect(screen.getByText('50%')).toBeDefined();
@@ -51,7 +51,7 @@ describe('SwarmNodeGroup', () => {
     renderGroup({
       dgNode: { ...mgr, swarmNode: { ...mgr.swarmNode!, role: 'worker', leader: false, availability: 'drain' } },
     });
-    expect(screen.getByTestId('role-badge').textContent).toBe('worker');
+    expect(screen.getByTestId('role-badge').textContent).toBe('wkr');
     expect(screen.getByTestId('availability-chip').textContent).toBe('drain');
     expect(screen.getByTestId('no-agent').textContent).toContain('no agent');
   });
@@ -105,8 +105,8 @@ describe('RoleGroup', () => {
 
   it('shows the role title with node and task counts in a legend tab', () => {
     renderRole({ role: 'manager', nodeCount: 3, taskCount: 5 });
-    expect(screen.getByTestId('role-group-tab').textContent).toContain('Managers · 3');
-    expect(screen.getByTestId('role-group-summary').textContent).toBe('5 tasks');
+    expect(screen.getByTestId('role-group-tab').textContent).toContain('Managers');
+    expect(screen.getByTestId('role-group-summary').textContent).toBe('3 nodes · 5 tasks');
     expect(screen.getByTestId('role-group').getAttribute('data-role')).toBe('manager');
   });
 
@@ -115,9 +115,9 @@ describe('RoleGroup', () => {
     const worker = (screen.getByTestId('role-group') as HTMLElement).style.borderColor;
     cleanup();
     renderRole({ role: 'manager', nodeCount: 1, taskCount: 1 });
-    expect(screen.getByTestId('role-group-tab').textContent).toContain('Managers · 1');
+    expect(screen.getByTestId('role-group-tab').textContent).toContain('Managers');
     expect((screen.getByTestId('role-group') as HTMLElement).style.borderColor).not.toBe(worker);
-    expect(screen.getByTestId('role-group-summary').textContent).toBe('1 task');
+    expect(screen.getByTestId('role-group-summary').textContent).toBe('1 node · 1 task');
   });
 });
 
