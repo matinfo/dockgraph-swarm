@@ -22,7 +22,7 @@ export function snapshotFingerprint(nodes: DGNode[], edges: DGEdge[]): string {
   const nk = (nodes ?? [])
     .map(
       (n) =>
-        `${n.id}:${n.status ?? ''}:${n.image ?? ''}:${n.networkId ?? ''}:${(n.ports ?? []).map((p) => `${p.host}-${p.container}`).join(';')}:${n.stack ?? ''}:${serviceKey(n)}`,
+        `${n.id}:${n.status ?? ''}:${n.image ?? ''}:${n.networkId ?? ''}:${(n.ports ?? []).map((p) => `${p.host}-${p.container}`).join(';')}:${n.stack ?? ''}:${serviceKey(n)}:${JSON.stringify(n.swarmNode ?? null)}`
     )
     .sort()
     .join(',');
