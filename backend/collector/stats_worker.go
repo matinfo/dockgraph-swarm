@@ -121,7 +121,11 @@ func PollSamples(ctx context.Context, cli DockerClient, maxWorkers int) []Contai
 // NodeStatsPrefix+hostname, for samples stamped with a node. Aggregates sum
 // CPU, memory, network, block I/O and PIDs across their containers; CPU
 // throttling takes the worst container. A container whose name equals a
-// service name keeps its own entry. Every hostname in reportingNodes gets a
+// service name keeps its own entry. When several samples share a container
+// name (standalone containers named alike on different nodes), the first one
+// keeps the name-keyed entry: mergeSamples puts local samples first, so the
+// local container wins. Every sample still counts in its service and node
+// aggregates. Every hostname in reportingNodes gets a
 // node aggregate even without samples: its agent answered, but DockGraph's
 // own containers are never sampled, so an otherwise empty node has none.
 // Other nodes without samples (e.g. no agent) get no aggregate.
@@ -135,7 +139,9 @@ func BuildStatsSnapshot(samples []ContainerSample, reportingNodes ...string) Sta
 		}
 	}
 	for _, s := range samples {
-		stats[s.Name] = s.Stats
+		if _, taken := stats[s.Name]; !taken {
+			stats[s.Name] = s.Stats
+		}
 		if svc := s.ServiceName(); svc != "" && !IsNodeSeries(svc) {
 			services[svc] = addStats(services[svc], s.Stats)
 		}
@@ -172,29 +178,27 @@ func addStats(agg, s ContainerStats) ContainerStats {
 }
 
 // mergeSamples appends remote samples to local ones, dropping any remote
-// sample for a container already sampled locally so a task is never counted
-// twice in its service aggregate. Stats are keyed by container name, so a
-// remote container whose name is already taken (e.g. a standalone container
-// with the same name on another node) is dropped too: local samples win and
-// never get overwritten by another node's container.
+// sample for a container already sampled (same ID) so a container is never
+// counted twice in its service and node aggregates. Remote containers that
+// only share a name with another sample (e.g. standalone containers named
+// alike on different nodes) are kept, so their node still reports their
+// usage; local samples come first, so BuildStatsSnapshot gives the
+// name-keyed entry to the local container.
 func mergeSamples(local, remote []ContainerSample) []ContainerSample {
 	if len(remote) == 0 {
 		return local
 	}
-	seenIDs := make(map[string]bool, len(local))
-	seenNames := make(map[string]bool, len(local))
+	seenIDs := make(map[string]bool, len(local)+len(remote))
 	for _, s := range local {
 		seenIDs[s.ID] = true
-		seenNames[s.Name] = true
 	}
 	merged := make([]ContainerSample, 0, len(local)+len(remote))
 	merged = append(merged, local...)
 	for _, s := range remote {
-		if s.ID == "" || seenIDs[s.ID] || seenNames[s.Name] {
+		if s.ID == "" || seenIDs[s.ID] {
 			continue
 		}
 		seenIDs[s.ID] = true
-		seenNames[s.Name] = true
 		merged = append(merged, s)
 	}
 	return merged
