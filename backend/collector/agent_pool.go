@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -167,6 +168,13 @@ func (p *AgentPool) Refresh(ctx context.Context) {
 	if err != nil && ctx.Err() != nil {
 		return
 	}
+	// A transient resolver failure (timeout, SERVFAIL) must not drop every
+	// known agent until the next refresh; only an authoritative "no such
+	// host" (no agent task running) empties the pool.
+	if err != nil && !isDNSNotFound(err) {
+		log.Printf("agents: resolving %s: %v; keeping %d known agent(s)", host, err, len(p.remoteAgents()))
+		return
+	}
 
 	addrs := make([]string, 0, len(ips))
 	for _, ip := range ips {
@@ -226,6 +234,17 @@ func (p *AgentPool) Refresh(ctx context.Context) {
 			log.Printf("agents: %d via %s", len(agents), host)
 		}
 	}
+}
+
+// isDNSNotFound reports whether err is an authoritative "host not found".
+// Errors that are not *net.DNSError (e.g. from a stub resolver) count as
+// not found so the pool never keeps agents it cannot vouch for.
+func isDNSNotFound(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return dnsErr.IsNotFound
+	}
+	return true
 }
 
 // remoteAgents returns the discovered agents except the local node's.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,6 +138,29 @@ func TestAgentPoolNoAgentsFallsBack(t *testing.T) {
 	}
 	if _, ok := p.LocateContainer(context.Background(), "whatever"); ok {
 		t.Error("nothing should be located without agents")
+	}
+}
+
+func TestAgentPoolKeepsAgentsOnTransientDNSError(t *testing.T) {
+	a1 := newFakeAgent(t, "node-1")
+	res := &stubResolver{addrs: []string{a1.addr()}}
+	p := newTestPool(res, "", nil)
+	p.Refresh(context.Background())
+	if n := len(p.remoteAgents()); n != 1 {
+		t.Fatalf("want 1 agent, got %d", n)
+	}
+
+	res.err = &net.DNSError{Err: "i/o timeout", Name: "tasks.agent", IsTimeout: true}
+	p.Refresh(context.Background())
+	if n := len(p.remoteAgents()); n != 1 {
+		t.Fatalf("transient DNS error must keep known agents, got %d", n)
+	}
+
+	res.err = &net.DNSError{Err: "no such host", Name: "tasks.agent", IsNotFound: true}
+	res.addrs = nil
+	p.Refresh(context.Background())
+	if n := len(p.remoteAgents()); n != 0 {
+		t.Fatalf("NXDOMAIN must drop agents, got %d", n)
 	}
 }
 

@@ -500,7 +500,9 @@ export function FlowCanvas({
           <p style={{ color: theme.nodeSubtext, fontSize: 14 }}>
             {!ready
               ? "Connecting to backend..."
-              : "No containers detected. Start a container to visualize the graph."}
+              : selectedStack
+                ? "Nothing to show in this stack. Pick another stack or \"All stacks\" above."
+                : "No containers detected. Start a container to visualize the graph."}
           </p>
         </Overlay>
       )}

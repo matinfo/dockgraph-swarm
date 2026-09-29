@@ -139,22 +139,28 @@ func BuildStatsSnapshot(samples []ContainerSample) StatsSnapshot {
 
 // mergeSamples appends remote samples to local ones, dropping any remote
 // sample for a container already sampled locally so a task is never counted
-// twice in its service aggregate.
+// twice in its service aggregate. Stats are keyed by container name, so a
+// remote container whose name is already taken (e.g. a standalone container
+// with the same name on another node) is dropped too: local samples win and
+// never get overwritten by another node's container.
 func mergeSamples(local, remote []ContainerSample) []ContainerSample {
 	if len(remote) == 0 {
 		return local
 	}
-	seen := make(map[string]bool, len(local))
+	seenIDs := make(map[string]bool, len(local))
+	seenNames := make(map[string]bool, len(local))
 	for _, s := range local {
-		seen[s.ID] = true
+		seenIDs[s.ID] = true
+		seenNames[s.Name] = true
 	}
 	merged := make([]ContainerSample, 0, len(local)+len(remote))
 	merged = append(merged, local...)
 	for _, s := range remote {
-		if s.ID == "" || seen[s.ID] {
+		if s.ID == "" || seenIDs[s.ID] || seenNames[s.Name] {
 			continue
 		}
-		seen[s.ID] = true
+		seenIDs[s.ID] = true
+		seenNames[s.Name] = true
 		merged = append(merged, s)
 	}
 	return merged

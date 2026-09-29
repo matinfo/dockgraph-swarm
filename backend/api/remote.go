@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -21,6 +22,18 @@ const (
 	remoteRequestTimeout = 20 * time.Second
 	localProbeTimeout    = 5 * time.Second
 )
+
+// maxRemoteResponseBytes caps a proxied one-shot agent response.
+const maxRemoteResponseBytes = 16 << 20
+
+// errAgentResponseTooLarge reports an agent response over the cap.
+var errAgentResponseTooLarge = errors.New("agent response too large")
+
+// limitedBody reads through a limit but closes the underlying body.
+type limitedBody struct {
+	io.Reader
+	io.Closer
+}
 
 // errAgentAuth reports that an agent rejected the shared token.
 var errAgentAuth = errors.New("agent rejected token (check DG_AGENT_TOKEN on server and agents)")
@@ -134,6 +147,14 @@ func (p *AgentProxy) wrap(local http.HandlerFunc, inspector ContainerInspector, 
 			ModifyResponse: func(resp *http.Response) error {
 				if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 					return errAgentAuth
+				}
+				// One-shot responses (inspect, log pages) are bounded; only
+				// the SSE stream is unbounded by design.
+				if !stream {
+					if resp.ContentLength > maxRemoteResponseBytes {
+						return errAgentResponseTooLarge
+					}
+					resp.Body = limitedBody{io.LimitReader(resp.Body, maxRemoteResponseBytes), resp.Body}
 				}
 				return nil
 			},

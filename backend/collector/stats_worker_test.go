@@ -268,3 +268,19 @@ func sampleStatsResponse(cpuDelta, systemDelta uint64, onlineCPUs uint32) contai
 		PidsStats: containertypes.PidsStats{Current: 10},
 	}
 }
+
+func TestMergeSamplesLocalWinsOnNameCollision(t *testing.T) {
+	local := []ContainerSample{{ID: "local1", Name: "exporter", Stats: ContainerStats{CPUPercent: 1}}}
+	remote := []ContainerSample{
+		{ID: "remote1", Name: "exporter", Stats: ContainerStats{CPUPercent: 99}},
+		{ID: "local1", Name: "exporter", Stats: ContainerStats{CPUPercent: 50}},
+		{ID: "remote2", Name: "web.1.abc", Stats: ContainerStats{CPUPercent: 2}},
+	}
+	snap := BuildStatsSnapshot(mergeSamples(local, remote))
+	if got := snap.Stats["exporter"].CPUPercent; got != 1 {
+		t.Errorf("local sample must win on name collision, got cpu %v", got)
+	}
+	if _, ok := snap.Stats["web.1.abc"]; !ok {
+		t.Error("distinct remote sample must be kept")
+	}
+}
