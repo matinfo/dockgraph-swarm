@@ -119,7 +119,7 @@ environment:
 | `DG_PASSWORD_FILE` | _(none)_        | File to read the password from (e.g. a Docker secret; plaintext or argon2id hash); `DG_PASSWORD` wins if both are set. The server refuses to start if the file is unreadable or empty |
 | `DG_STATS_INTERVAL`| `3s`            | Container stats poll interval (Go duration)                                          |
 | `DG_STATS_WORKERS` | `50`            | Max concurrent stats API calls                                                       |
-| `DG_MODE`          | `auto`          | `auto`, `standalone`, `swarm` or `agent`. `auto` picks `swarm` on a swarm manager and `standalone` outside a swarm; it refuses to start on a swarm worker |
+| `DG_MODE`          | `auto`          | `auto`, `standalone`, `swarm` or `agent`. `auto` picks `swarm` on a swarm manager and `standalone` outside a swarm; it refuses to start on a swarm worker, on a pending, locked or errored swarm node, or when the daemon can't be queried after retrying for about 30 seconds |
 | `DG_SWARM_POLL_INTERVAL` | `5s`      | Swarm task poll interval (Go duration, min `1s`)                                     |
 | `DG_AGENT_PORT`    | `7801`          | Per-node agent HTTP port (agents listen on it, the server dials it)                 |
 | `DG_AGENT_ADDR`    | `tasks.agent`   | DNS name resolving to every agent task, optionally `host:port`                       |

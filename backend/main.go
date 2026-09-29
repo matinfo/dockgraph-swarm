@@ -102,7 +102,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	mode, swarmInfo, hostname := detectMode(ctx, cfg.Mode, dockerCli)
+	mode, swarmInfo, hostname, err := detectMode(ctx, cfg.Mode, dockerCli.Info, infoRetry)
+	if err != nil {
+		log.Fatalf("mode detection: %v", err)
+	}
 	if mode == collector.ModeAgent {
 		runAgent(ctx, cfg, dockerCli)
 		return
@@ -329,34 +332,6 @@ func pipeStatsWithHistory(ctx context.Context, sc *collector.StatsCollector, hub
 			return
 		}
 	}
-}
-
-// detectMode resolves DG_MODE against the daemon's swarm state, exiting on
-// an unusable combination (e.g. auto on a swarm worker). If the daemon can't
-// be queried, auto falls back to standalone.
-//
-// It also returns the daemon's hostname (Info().Name). Swarm fills a node's
-// Description.Hostname from that same value, and per-node agents report it
-// too, so it matches the hostname swarm node graph nodes and per-node stats
-// aggregates are keyed by without an extra NodeInspect call.
-func detectMode(ctx context.Context, requested string, cli *client.Client) (string, swarm.Info, string) {
-	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	var (
-		sw       swarm.Info
-		hostname string
-	)
-	if info, err := cli.Info(infoCtx); err != nil {
-		log.Printf("WARN  failed to query docker info for mode detection: %v", err)
-	} else {
-		sw = info.Swarm
-		hostname = info.Name
-	}
-	mode, err := resolveMode(requested, sw)
-	if err != nil {
-		log.Fatalf("mode detection: %v", err)
-	}
-	return mode, sw, hostname
 }
 
 // pipeEvents subscribes to Docker events and records them in the event history
