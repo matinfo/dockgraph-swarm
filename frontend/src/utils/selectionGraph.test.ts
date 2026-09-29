@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Node as RFNode, Edge as RFEdge } from '@xyflow/react';
 import {
+  isSelectionPresent,
   resolveConnectedElements,
   styleNodesForSelection,
   styleEdgesForSelection,
@@ -199,5 +200,25 @@ describe('per-node view (nested groups and service cards)', () => {
     expect(matchesSearch(nodes[4], matching)).toBe(true);
     expect(matchesSearch(nodes[5], matching)).toBe(false);
     expect(matchesSearch(nodes[0], matching)).toBe(true); // groups stay lit
+  });
+});
+
+describe('isSelectionPresent', () => {
+  const nodes = [makeNode('a'), makeNode('b')];
+  const edges = [makeEdge('e1', 'a', 'b')];
+
+  it('finds a selected node or edge in the current graph', () => {
+    expect(isSelectionPresent({ type: 'node', id: 'a' }, nodes, edges)).toBe(true);
+    expect(isSelectionPresent({ type: 'edge', id: 'e1' }, nodes, edges)).toBe(true);
+  });
+
+  it('reports a selection left over from another topology', () => {
+    expect(isSelectionPresent({ type: 'node', id: 'gone' }, nodes, edges)).toBe(false);
+    expect(isSelectionPresent({ type: 'edge', id: 'gone' }, nodes, edges)).toBe(false);
+  });
+
+  it('does not match a node id against edges or the reverse', () => {
+    expect(isSelectionPresent({ type: 'edge', id: 'a' }, nodes, edges)).toBe(false);
+    expect(isSelectionPresent({ type: 'node', id: 'e1' }, nodes, edges)).toBe(false);
   });
 });

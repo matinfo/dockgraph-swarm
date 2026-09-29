@@ -46,6 +46,17 @@ function descendantIds(groupId: string, nodes: RFNode[]): Set<string> {
 }
 
 /**
+ * True when the selected node or edge exists in the current graph. After a
+ * stack or grouping change the selection can name an element that is gone;
+ * styling for it would fade everything else, so callers treat it as no
+ * selection.
+ */
+export function isSelectionPresent(selection: SelectionState, nodes: RFNode[], edges: RFEdge[]): boolean {
+  const list: { id: string }[] = selection.type === 'node' ? nodes : edges;
+  return list.some((el) => el.id === selection.id);
+}
+
+/**
  * Walks the graph from the selected element to find all directly connected
  * nodes, edges, and parent groups that should remain fully visible.
  */

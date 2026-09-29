@@ -4,6 +4,7 @@ import { useStore } from '@xyflow/react';
 import { FADE_OPACITY, zoomSelector } from '../utils/constants';
 import {
   type SelectionState,
+  isSelectionPresent,
   resolveConnectedElements,
   styleNodesForSelection,
   styleEdgesForSelection,
@@ -56,8 +57,18 @@ export function useSelectionHighlight(
   const isLowZoom = useStore(zoomSelector);
 
   const { styledNodes, styledEdges, canvasEdges, svgEdges, linkEdges } = useMemo(() => {
-    const links = linkEdgesFor?.(selection) ?? [];
-    if (!selection) {
+    let active = selection;
+    let links = linkEdgesFor?.(active) ?? [];
+    // A selection left over from a previous topology (stack or grouping
+    // change) is ignored rather than fading the whole new graph. It is kept,
+    // not cleared, so a node that comes back after an async relayout stays
+    // selected. Selection-dependent links count, so a selected link edge
+    // stays active.
+    if (active && !isSelectionPresent(active, nodes, links.length > 0 ? [...edges, ...links] : edges)) {
+      active = null;
+      links = linkEdgesFor?.(null) ?? [];
+    }
+    if (!active) {
       // When search is active but no selection, dim non-matching nodes.
       if (matchingNodeIds) {
         const searchStyled = nodes.map((n) => ({
@@ -82,7 +93,7 @@ export function useSelectionHighlight(
     }
 
     const { connectedEdgeIds, connectedNodeIds, highlightedGroupIds } =
-      resolveConnectedElements(selection, nodes, links.length > 0 ? [...edges, ...links] : edges);
+      resolveConnectedElements(active, nodes, links.length > 0 ? [...edges, ...links] : edges);
 
     const styledEdgeList = styleEdgesForSelection(edges, connectedEdgeIds, isLowZoom);
 
