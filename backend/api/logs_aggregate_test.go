@@ -82,7 +82,7 @@ func TestCollectHistory_MergeSortsAndExcludesSelf(t *testing.T) {
 		"self": frameStr("2026-06-11T10:00:00.000000000Z self-line"),
 	}}
 
-	lines, err := collectHistory(context.Background(), lister, logger, "", 50)
+	lines, err := collectHistory(context.Background(), logScope{}, lister, logger, "", 50)
 	if err != nil {
 		t.Fatalf("collectHistory: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestHandleAggregateLogsHistory(t *testing.T) {
 		"a": frameStr("2026-06-11T10:00:02.000000000Z web-line"),
 		"b": frameStr("2026-06-11T10:00:01.000000000Z db-line"),
 	}}
-	h := HandleAggregateLogsHistory(lister, logger)
+	h := HandleAggregateLogsHistory(lister, logger, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/logs/history?limit=10", nil)
 	rec := httptest.NewRecorder()
@@ -179,7 +179,7 @@ func TestHandleAggregateLogs_StreamsInitialContainers(t *testing.T) {
 	logger := followLogger{byID: map[string]string{
 		"a": frameStr("2026-06-11T10:00:00.000000000Z hello"),
 	}}
-	h := HandleAggregateLogs(lister, logger, noEvents{})
+	h := HandleAggregateLogs(lister, logger, noEvents{}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

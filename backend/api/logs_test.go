@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -13,10 +14,12 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	networktypes "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/swarm"
 	volumetypes "github.com/docker/docker/api/types/volume"
 )
 
@@ -349,13 +352,63 @@ func TestReadLogLinesMultipleLinesPerFrame(t *testing.T) {
 func newTestServer(logger *stubContainerLogger) *httptest.Server {
 	hub := NewHub()
 	fs := fstest.MapFS{"index.html": {Data: []byte("ok")}}
-	handler := NewServer(hub, fs, &stubHealth{}, nil, &stubDockerAPI{logger: logger}, nil, nil, nil)
+	handler := NewServer(hub, fs, &stubHealth{}, nil, &stubDockerAPI{logger: logger}, nil, nil, nil, "")
 	return httptest.NewServer(handler)
 }
 
 // stubDockerAPI implements DockerAPI by delegating log calls to the embedded logger.
+// The swarm fields back the service endpoints; serviceLogs maps a service
+// name or ID to canned multiplexed log bytes.
 type stubDockerAPI struct {
 	logger *stubContainerLogger
+
+	services    []swarm.Service
+	tasks       []swarm.Task
+	nodes       []swarm.Node
+	serviceLogs map[string]string
+	networks    map[string]string // network ID -> name
+}
+
+func (s *stubDockerAPI) findService(id string) (swarm.Service, bool) {
+	for _, svc := range s.services {
+		if svc.ID == id || svc.Spec.Name == id {
+			return svc, true
+		}
+	}
+	return swarm.Service{}, false
+}
+
+func (s *stubDockerAPI) ServiceInspectWithRaw(_ context.Context, id string, _ swarm.ServiceInspectOptions) (swarm.Service, []byte, error) {
+	if svc, ok := s.findService(id); ok {
+		return svc, nil, nil
+	}
+	return swarm.Service{}, nil, fmt.Errorf("service %s not found", id)
+}
+
+func (s *stubDockerAPI) ServiceList(_ context.Context, _ swarm.ServiceListOptions) ([]swarm.Service, error) {
+	return s.services, nil
+}
+
+func (s *stubDockerAPI) TaskList(_ context.Context, opts swarm.TaskListOptions) ([]swarm.Task, error) {
+	var out []swarm.Task
+	for _, t := range s.tasks {
+		if opts.Filters.Len() == 0 || opts.Filters.ExactMatch("service", t.ServiceID) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (s *stubDockerAPI) NodeList(_ context.Context, _ swarm.NodeListOptions) ([]swarm.Node, error) {
+	return s.nodes, nil
+}
+
+func (s *stubDockerAPI) ServiceLogs(_ context.Context, id string, _ containertypes.LogsOptions) (io.ReadCloser, error) {
+	data, ok := s.serviceLogs[id]
+	if !ok {
+		return nil, fmt.Errorf("no logs for %s", id)
+	}
+	return io.NopCloser(strings.NewReader(data)), nil
 }
 
 func (s *stubDockerAPI) ContainerLogs(ctx context.Context, containerID string, opts containertypes.LogsOptions) (io.ReadCloser, error) {
@@ -370,7 +423,10 @@ func (s *stubDockerAPI) VolumeInspect(_ context.Context, _ string) (volumetypes.
 	return volumetypes.Volume{}, fmt.Errorf("not implemented")
 }
 
-func (s *stubDockerAPI) NetworkInspect(_ context.Context, _ string, _ networktypes.InspectOptions) (networktypes.Inspect, error) {
+func (s *stubDockerAPI) NetworkInspect(_ context.Context, id string, _ networktypes.InspectOptions) (networktypes.Inspect, error) {
+	if name, ok := s.networks[id]; ok {
+		return networktypes.Inspect{ID: id, Name: name}, nil
+	}
 	return networktypes.Inspect{}, fmt.Errorf("not implemented")
 }
 
@@ -847,4 +903,77 @@ func TestLogsStreamInvalidTailIgnored(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewestLinesBefore(t *testing.T) {
+	lines := []logEntry{
+		{Line: "b2", Timestamp: "2024-01-01T00:00:04.000000000Z"},
+		{Line: "a1", Timestamp: "2024-01-01T00:00:01.000000000Z"},
+		{Line: "a3", Timestamp: "2024-01-01T00:00:05.000000000Z"},
+		{Line: "b1", Timestamp: "2024-01-01T00:00:02.000000000Z"},
+		{Line: "a2", Timestamp: "2024-01-01T00:00:03.000000000Z"},
+	}
+	got := newestLinesBefore(append([]logEntry(nil), lines...), "2024-01-01T00:00:04.000000000Z", 2)
+	if len(got) != 2 || got[0].Line != "b1" || got[1].Line != "a2" {
+		t.Errorf("before-filtered page = %+v", got)
+	}
+	got = newestLinesBefore(append([]logEntry(nil), lines...), "", 3)
+	if len(got) != 3 || got[0].Line != "a2" || got[2].Line != "a3" {
+		t.Errorf("newest page = %+v", got)
+	}
+}
+
+// tickingLogger follows forever, emitting one log line per interval until
+// the request is cancelled.
+type tickingLogger struct{ interval time.Duration }
+
+func (l tickingLogger) ContainerLogs(ctx context.Context, _ string, _ containertypes.LogsOptions) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		t := time.NewTicker(l.interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if _, err := pw.Write(frame("2026-06-11T10:00:00.000000000Z tick")); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	return pr, nil
+}
+
+// A log stream must outlive http.Server.WriteTimeout, which is an absolute
+// deadline from the start of the request: without lifting it, the server
+// cuts every SSE stream once it expires, even while lines are flowing.
+func TestHandleContainerLogsOutlivesWriteTimeout(t *testing.T) {
+	const writeTimeout = 200 * time.Millisecond
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/containers/{id}/logs", HandleContainerLogs(tickingLogger{interval: 20 * time.Millisecond}))
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Config.WriteTimeout = writeTimeout
+	srv.Start()
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/containers/web/logs", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	start := time.Now()
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		if strings.HasPrefix(scanner.Text(), "data: ") && time.Since(start) > 4*writeTimeout {
+			return // still streaming well past the write deadline
+		}
+	}
+	t.Fatalf("stream ended after %v (write timeout %v): %v", time.Since(start), writeTimeout, scanner.Err())
 }

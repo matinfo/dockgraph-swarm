@@ -1,4 +1,4 @@
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
 import { useTheme } from "../../theme";
 import { TimeRangeSelector } from "./TimeRangeSelector";
 import { StatusSummaryCard } from "./StatusSummaryCard";
@@ -10,7 +10,11 @@ import { TopConsumersCard } from "./TopConsumersCard";
 import { AlertsCard } from "./AlertsCard";
 import { ComposeProjectsCard } from "./ComposeProjectsCard";
 import { EventTimelineCard } from "./EventTimelineCard";
-import { useStatsHistory, type TimeRange } from "../../hooks/useStatsHistory";
+import { SwarmNodesCard } from "./SwarmNodesCard";
+import { SegmentedToggle } from "../GroupByToggle";
+import { useStatsHistory, type TimeRange, type StatsHistoryData, type HistoryScope } from "../../hooks/useStatsHistory";
+import { useSystemInfo } from "../../hooks/useSystemInfo";
+import { STANDALONE_STACK, isWorkload } from "../../utils/stack";
 import type { ResourceTab } from "../table/TableView";
 import type { DGNode } from "../../types";
 import type { ContainerStatsData } from "../../types/stats";
@@ -24,7 +28,27 @@ interface Props {
   onResourceTab: (tab: ResourceTab) => void;
   /** Open the detail panel for the given graph node id. */
   onInspect: (nodeId: string) => void;
+  /** Active stack scope (null = all). `nodes` are already scoped to it. */
+  stack?: string | null;
+  /** Scope the UI to a stack/project (from the projects card). */
+  onSelectStack?: (stack: string) => void;
 }
+
+/**
+ * The backend can only filter history by a named stack. For the standalone
+ * scope, keep the series of the (already scoped) workloads client-side.
+ */
+function scopeHistory(data: StatsHistoryData | null, nodes: DGNode[], stack: string | null | undefined): StatsHistoryData | null {
+  if (!data || stack !== STANDALONE_STACK) return data;
+  const names = new Set(nodes.filter(isWorkload).map((n) => n.name));
+  const containers = Object.fromEntries(Object.entries(data.containers).filter(([name]) => names.has(name)));
+  return { ...data, containers };
+}
+
+const HISTORY_SCOPES = [
+  { key: "workloads", label: "Workload" },
+  { key: "nodes", label: "Node" },
+] as const;
 
 function useIsNarrow(breakpoint = 900): boolean {
   const [narrow, setNarrow] = useState(() => window.innerWidth < breakpoint);
@@ -37,10 +61,21 @@ function useIsNarrow(breakpoint = 900): boolean {
   return narrow;
 }
 
-export const Dashboard = memo(function Dashboard({ nodes, statsMap, onStatusFilter, onResourceTab, onInspect }: Props) {
+export const Dashboard = memo(function Dashboard({ nodes, statsMap, onStatusFilter, onResourceTab, onInspect, stack, onSelectStack }: Props) {
   const { theme } = useTheme();
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
-  const { data: historyData } = useStatsHistory(timeRange);
+  const { data: systemInfo } = useSystemInfo();
+  const swarm = systemInfo?.mode === "swarm";
+  // Charts plot workloads, or one series per swarm node. Node history isn't
+  // per stack, so a selected stack forces the workload view.
+  const [historyScope, setHistoryScope] = useState<HistoryScope>("workloads");
+  const effectiveScope: HistoryScope = swarm && !stack ? historyScope : "workloads";
+  const serverStack = stack && stack !== STANDALONE_STACK ? stack : null;
+  const { data: rawHistory } = useStatsHistory(timeRange, serverStack, effectiveScope);
+  const historyData = useMemo(
+    () => (effectiveScope === "nodes" ? rawHistory : scopeHistory(rawHistory, nodes, stack)),
+    [rawHistory, nodes, stack, effectiveScope],
+  );
   const narrow = useIsNarrow();
 
   const cols4 = narrow ? "1fr" : "repeat(4, 1fr)";
@@ -65,7 +100,19 @@ export const Dashboard = memo(function Dashboard({ nodes, statsMap, onStatusFilt
           marginBottom: 20,
         }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: theme.nodeText }}>Dashboard</span>
-          <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {swarm && (
+              <SegmentedToggle
+                label="By"
+                options={HISTORY_SCOPES}
+                value={effectiveScope}
+                onChange={setHistoryScope}
+                disabled={!!stack}
+                title={stack ? "Per-node history covers all stacks; clear the stack to plot nodes" : "Plot the charts per workload or per swarm node"}
+              />
+            )}
+            <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+          </div>
         </div>
 
         {/* Row 1: 4 summary cards — equal height */}
@@ -88,8 +135,13 @@ export const Dashboard = memo(function Dashboard({ nodes, statsMap, onStatusFilt
         <div style={{ display: "grid", gridTemplateColumns: cols2, gap: 12 }}>
           <TopConsumersCard statsMap={statsMap} onInspect={onInspect} />
           <AlertsCard nodes={nodes} statsMap={statsMap} onInspect={onInspect} />
-          <ComposeProjectsCard nodes={nodes} />
+          <ComposeProjectsCard nodes={nodes} swarm={swarm} onSelectStack={onSelectStack} />
           <EventTimelineCard nodes={nodes} onInspect={onInspect} />
+          {swarm && (
+            <div style={{ gridColumn: "1 / -1" }}>
+              <SwarmNodesCard nodes={nodes} statsMap={statsMap} onInspect={onInspect} />
+            </div>
+          )}
         </div>
       </div>
     </div>

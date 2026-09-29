@@ -20,6 +20,23 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+// maskLabels returns a copy of labels with credential-looking values masked,
+// using the same key rule as environment variables. Service labels often
+// carry reverse-proxy settings such as Traefik basic-auth user hashes.
+func maskLabels(labels map[string]string) map[string]string {
+	if labels == nil {
+		return nil
+	}
+	out := make(map[string]string, len(labels))
+	for k, v := range labels {
+		if secrets.IsSensitiveKey(k) {
+			v = secrets.Masked
+		}
+		out[k] = v
+	}
+	return out
+}
+
 func filterEnvVars(envList []string) []map[string]string {
 	result := make([]map[string]string, 0, len(envList))
 	for _, e := range envList {

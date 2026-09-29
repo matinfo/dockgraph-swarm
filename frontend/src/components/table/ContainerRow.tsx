@@ -5,6 +5,7 @@ import { STATUS_COLORS, networkColor } from "../../utils/colors";
 import { METRIC_COLORS } from "../dashboard/palette";
 import { formatBytes } from "../../utils/formatBytes";
 import { INACTIVE_OPACITY } from "../../utils/constants";
+import { projectOf } from "../../utils/stack";
 import { tableRow } from "./tableStyles";
 import type { DGNode } from "../../types";
 import type { ContainerStatsData } from "../../types/stats";
@@ -17,7 +18,7 @@ interface Props {
   gridTemplate: string;
 }
 
-const ACTIVE_STATUSES = new Set(["running", "unhealthy"]);
+const ACTIVE_STATUSES = new Set(["running", "unhealthy", "degraded", "updating"]);
 
 function formatPorts(node: DGNode): string {
   if (!node.ports || node.ports.length === 0) return "\u2014";
@@ -75,15 +76,20 @@ export const ContainerRow = memo(function ContainerRow({
             style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, flexShrink: 0, boxShadow: isActive ? `0 0 6px ${statusColor}` : "none" }}
           />
           {node.status ?? "unknown"}
+          {node.service && (
+            <span style={{ fontFamily: "var(--dg-font-mono)", fontSize: 11, color: theme.nodeSubtext }}>
+              {node.service.replicas.running}/{node.service.replicas.desired}
+            </span>
+          )}
         </span>
         <span style={{ color: theme.nodeSubtext, fontFamily: "var(--dg-font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {formatPorts(node)}
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
           {node.networkId && (
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: networkColor(formatNetwork(node)), flexShrink: 0 }} />
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: networkColor(formatNetwork(node), projectOf(node)), flexShrink: 0 }} />
           )}
-          <span style={{ color: node.networkId ? networkColor(formatNetwork(node)) : theme.nodeSubtext, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ color: node.networkId ? networkColor(formatNetwork(node), projectOf(node)) : theme.nodeSubtext, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {formatNetwork(node)}
           </span>
         </span>
