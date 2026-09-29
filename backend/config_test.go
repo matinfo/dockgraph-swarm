@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -493,6 +494,10 @@ func TestLoadConfig_AgentToken(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte("from-file\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	emptyFile := filepath.Join(dir, "empty")
+	if err := os.WriteFile(emptyFile, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name  string
@@ -505,6 +510,7 @@ func TestLoadConfig_AgentToken(t *testing.T) {
 		{"file_trimmed", "", tokenFile, "from-file"},
 		{"inline_wins", "inline-secret", tokenFile, "inline-secret"},
 		{"missing_file", "", filepath.Join(dir, "missing"), ""},
+		{"empty_file", "", emptyFile, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -576,5 +582,38 @@ func TestReadSecretEnv_MissingFile(t *testing.T) {
 	t.Setenv("DG_TEST_SECRET_FILE", filepath.Join(t.TempDir(), "missing"))
 	if _, err := readSecretEnv("DG_TEST_SECRET"); err == nil {
 		t.Fatal("expected an error for an unreadable secret file")
+	}
+}
+
+func TestReadSecretEnv_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{"empty": "", "whitespace": " \n\t\n"} {
+		t.Run(name, func(t *testing.T) {
+			file := filepath.Join(dir, name)
+			if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("DG_TEST_SECRET", "")
+			t.Setenv("DG_TEST_SECRET_FILE", file)
+			_, err := readSecretEnv("DG_TEST_SECRET")
+			if err == nil || !strings.Contains(err.Error(), "DG_TEST_SECRET_FILE is empty") {
+				t.Fatalf("expected an empty-file error, got %v", err)
+			}
+		})
+	}
+}
+
+// The inline variable wins before the file is read, so an empty file next
+// to it is not an error.
+func TestReadSecretEnv_InlineWinsOverEmptyFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DG_TEST_SECRET", "inline")
+	t.Setenv("DG_TEST_SECRET_FILE", file)
+	got, err := readSecretEnv("DG_TEST_SECRET")
+	if err != nil || got != "inline" {
+		t.Fatalf("got %q, %v; want inline, nil", got, err)
 	}
 }

@@ -212,14 +212,21 @@ if [ "$SKIP_BUILD" = false ]; then
   docker build -t "$IMAGE" .
 fi
 
-# ── DG_PASSWORD_FILE: unreadable file is fatal ────────────────
+# ── DG_PASSWORD_FILE: unreadable or empty file is fatal ───────
 # LoadConfig runs before --healthcheck, so this exits without a server.
+# /dev/null exists in the image and is an empty file.
 
 out=$(docker run --rm -e DG_PASSWORD_FILE=/nonexistent/password "$IMAGE" --healthcheck 2>&1) &&
   fail "unreadable DG_PASSWORD_FILE did not abort startup"
 grep -q "cannot read DG_PASSWORD_FILE" <<<"$out" ||
   fail "unreadable DG_PASSWORD_FILE: unexpected output: $out"
 echo "Unreadable DG_PASSWORD_FILE is fatal: OK"
+
+out=$(docker run --rm -e DG_PASSWORD_FILE=/dev/null "$IMAGE" --healthcheck 2>&1) &&
+  fail "empty DG_PASSWORD_FILE did not abort startup"
+grep -q "DG_PASSWORD_FILE is empty" <<<"$out" ||
+  fail "empty DG_PASSWORD_FILE: unexpected output: $out"
+echo "Empty DG_PASSWORD_FILE is fatal: OK"
 
 # ── Deploy DockGraph ──────────────────────────────────────────
 

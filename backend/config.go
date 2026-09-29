@@ -144,7 +144,8 @@ func parsePort(envKey, fallback string) string {
 // readSecretEnv returns the value of the environment variable key, or the
 // contents of the file named by key+"_FILE" (surrounding whitespace, such as
 // the trailing newline of a Docker secret, is trimmed). The inline variable
-// wins when both are set. It fails only when the file is named but unreadable.
+// wins when both are set. It fails when the file is named but unreadable or
+// empty (whitespace only).
 func readSecretEnv(key string) (string, error) {
 	value := os.Getenv(key)
 	path := strings.TrimSpace(os.Getenv(key + "_FILE"))
@@ -161,7 +162,13 @@ func readSecretEnv(key string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot read %s_FILE: %w", key, err)
 	}
-	return strings.TrimSpace(string(data)), nil
+	// A configured but empty secret file is a misconfiguration, not "unset":
+	// for DG_PASSWORD it would otherwise silently disable authentication.
+	value = strings.TrimSpace(string(data))
+	if value == "" {
+		return "", fmt.Errorf("%s_FILE is empty: %s", key, path)
+	}
+	return value, nil
 }
 
 // loadAgentToken returns the agent shared secret from DG_AGENT_TOKEN or

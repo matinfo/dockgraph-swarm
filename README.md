@@ -116,7 +116,7 @@ environment:
 | `DG_POLL_INTERVAL` | `30s`           | Docker API polling interval                                                          |
 | `DG_COMPOSE_PATH`  | _(auto-detect)_ | Override: comma-separated list of compose/stack files or directories to scan; prefix an entry with `name=` (e.g. `shop=/stacks/shop.yml`) to set its project/stack name |
 | `DG_PASSWORD`      | _(disabled)_    | Password for UI and WebSocket access; when set, requires login to view the dashboard |
-| `DG_PASSWORD_FILE` | _(none)_        | File to read the password from (e.g. a Docker secret; plaintext or argon2id hash); `DG_PASSWORD` wins if both are set. The server refuses to start if the file is unreadable |
+| `DG_PASSWORD_FILE` | _(none)_        | File to read the password from (e.g. a Docker secret; plaintext or argon2id hash); `DG_PASSWORD` wins if both are set. The server refuses to start if the file is unreadable or empty |
 | `DG_STATS_INTERVAL`| `3s`            | Container stats poll interval (Go duration)                                          |
 | `DG_STATS_WORKERS` | `50`            | Max concurrent stats API calls                                                       |
 | `DG_MODE`          | `auto`          | `auto`, `standalone`, `swarm` or `agent`. `auto` picks `swarm` on a swarm manager and `standalone` outside a swarm; it refuses to start on a swarm worker |
@@ -182,7 +182,7 @@ DockGraph requires access to the Docker daemon socket to read container, network
   environment:
     DG_PASSWORD: "your-secure-password"
   ```
-  To keep the password out of the environment, store it in a file (such as a Docker secret) and point `DG_PASSWORD_FILE` at it. Surrounding whitespace is trimmed, and the file may hold a plaintext password or an argon2id hash. The server refuses to start if the file can't be read, so a broken secret never disables authentication.
+  To keep the password out of the environment, store it in a file (such as a Docker secret) and point `DG_PASSWORD_FILE` at it. Surrounding whitespace is trimmed, and the file may hold a plaintext password or an argon2id hash. The server refuses to start if the file can't be read or is empty, so a broken secret never disables authentication.
   ```sh
   printf '%s' 'your-secure-password' | docker secret create dg_password -
   ```

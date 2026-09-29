@@ -29,7 +29,7 @@ All configuration is via environment variables:
 | `DG_POLL_INTERVAL` | `30s` | Docker API polling interval (Go duration) |
 | `DG_COMPOSE_PATH` | _(auto-detect)_ | Override: comma-separated compose files or directories to scan |
 | `DG_PASSWORD` | _(disabled)_ | Password for UI and WebSocket access (plaintext or argon2id hash) |
-| `DG_PASSWORD_FILE` | _(none)_ | File holding the password, e.g. a Docker secret; `DG_PASSWORD` wins if both are set. An unreadable file aborts startup |
+| `DG_PASSWORD_FILE` | _(none)_ | File holding the password, e.g. a Docker secret; `DG_PASSWORD` wins if both are set. An unreadable or empty file aborts startup |
 | `DG_STATS_INTERVAL` | `3s` | Container stats poll interval (Go duration) |
 | `DG_STATS_WORKERS` | `50` | Max concurrent stats API calls |
 | `DG_MODE` | `auto` | `auto`, `standalone`, `swarm` or `agent`. `auto` picks `swarm` on a swarm manager and `standalone` outside a swarm, and refuses to start on a swarm worker |
