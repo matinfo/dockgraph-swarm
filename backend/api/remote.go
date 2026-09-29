@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/dockgraph/dockgraph/collector"
@@ -23,17 +25,12 @@ const (
 	localProbeTimeout    = 5 * time.Second
 )
 
-// maxRemoteResponseBytes caps a proxied one-shot agent response.
-const maxRemoteResponseBytes = 16 << 20
+// maxRemoteResponseBytes caps a proxied one-shot agent response. A variable
+// so tests can lower it.
+var maxRemoteResponseBytes int64 = 16 << 20
 
 // errAgentResponseTooLarge reports an agent response over the cap.
 var errAgentResponseTooLarge = errors.New("agent response too large")
-
-// limitedBody reads through a limit but closes the underlying body.
-type limitedBody struct {
-	io.Reader
-	io.Closer
-}
 
 // errAgentAuth reports that an agent rejected the shared token.
 var errAgentAuth = errors.New("agent rejected token (check DG_AGENT_TOKEN on server and agents)")
@@ -154,10 +151,7 @@ func (p *AgentProxy) wrap(local http.HandlerFunc, inspector ContainerInspector, 
 				// One-shot responses (inspect, log pages) are bounded; only
 				// the SSE stream is unbounded by design.
 				if !stream {
-					if resp.ContentLength > maxRemoteResponseBytes {
-						return errAgentResponseTooLarge
-					}
-					resp.Body = limitedBody{io.LimitReader(resp.Body, maxRemoteResponseBytes), resp.Body}
+					return bufferBounded(resp)
 				}
 				return nil
 			},
@@ -171,4 +165,27 @@ func (p *AgentProxy) wrap(local http.HandlerFunc, inspector ContainerInspector, 
 		}
 		rp.ServeHTTP(w, r)
 	}
+}
+
+// bufferBounded reads a one-shot agent response fully, before any header
+// reaches the client, so an oversized body becomes a 502 instead of a 200
+// with truncated JSON. Chunked responses (unknown length) are read up to one
+// byte past the cap to detect overflow.
+func bufferBounded(resp *http.Response) error {
+	if resp.ContentLength > maxRemoteResponseBytes {
+		return errAgentResponseTooLarge
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRemoteResponseBytes+1))
+	_ = resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if int64(len(body)) > maxRemoteResponseBytes {
+		return errAgentResponseTooLarge
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.TransferEncoding = nil
+	resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	return nil
 }

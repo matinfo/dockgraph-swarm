@@ -39,6 +39,7 @@ type agentRecorder struct {
 	status  int
 	body    string
 	ctype   string
+	chunked bool          // flush headers first so the body is sent chunked
 	blockCh chan struct{} // when set, stream one event then block until closed
 }
 
@@ -46,13 +47,16 @@ func (a *agentRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	a.path, a.query = r.URL.Path, r.URL.RawQuery
 	a.auth, a.cookie = r.Header.Get("Authorization"), r.Header.Get("Cookie")
-	status, body, ctype, block := a.status, a.body, a.ctype, a.blockCh
+	status, body, ctype, chunked, block := a.status, a.body, a.ctype, a.chunked, a.blockCh
 	a.mu.Unlock()
 	if status == 0 {
 		status = http.StatusOK
 	}
 	w.Header().Set("Content-Type", ctype)
 	w.WriteHeader(status)
+	if chunked {
+		w.(http.Flusher).Flush()
+	}
 	_, _ = io.WriteString(w, body)
 	if block != nil {
 		w.(http.Flusher).Flush()
@@ -162,6 +166,50 @@ func TestAgentProxyAgentAuthFailureIsBadGateway(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("status %d, want 502", resp.StatusCode)
+	}
+}
+
+func TestAgentProxyOversizedResponseIsBadGateway(t *testing.T) {
+	old := maxRemoteResponseBytes
+	maxRemoteResponseBytes = 64
+	t.Cleanup(func() { maxRemoteResponseBytes = old })
+
+	big := `{"name":"` + strings.Repeat("x", 100) + `"}`
+	for _, chunked := range []bool{false, true} {
+		agent := &agentRecorder{body: big, ctype: "application/json", chunked: chunked}
+		locator := &stubLocator{urls: map[string]string{"shop_web.2.t2": ""}}
+		srv := newProxiedServer(t, agent, locator)
+
+		resp, err := http.Get(srv.URL + "/api/containers/shop_web.2.t2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadGateway {
+			t.Errorf("chunked=%v: status %d body %s, want 502", chunked, resp.StatusCode, body)
+		}
+	}
+}
+
+func TestAgentProxyChunkedResponseAtCapPassesThrough(t *testing.T) {
+	old := maxRemoteResponseBytes
+	want := `{"name":"shop_web.2.t2"}`
+	maxRemoteResponseBytes = int64(len(want))
+	t.Cleanup(func() { maxRemoteResponseBytes = old })
+
+	agent := &agentRecorder{body: want, ctype: "application/json", chunked: true}
+	locator := &stubLocator{urls: map[string]string{"shop_web.2.t2": ""}}
+	srv := newProxiedServer(t, agent, locator)
+
+	resp, err := http.Get(srv.URL + "/api/containers/shop_web.2.t2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != want {
+		t.Fatalf("status %d body %s", resp.StatusCode, body)
 	}
 }
 
