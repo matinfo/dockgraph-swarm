@@ -154,8 +154,8 @@ func TestBuildSwarmSnapshotServiceNode(t *testing.T) {
 	if web.Image != "nginx:1.25" {
 		t.Errorf("image digest not stripped: %s", web.Image)
 	}
-	if web.Labels[StackNamespaceLabel] != "shop" {
-		t.Errorf("stack label not kept: %v", web.Labels)
+	if web.Labels != nil {
+		t.Errorf("stack label forwarded in payload labels: %v", web.Labels)
 	}
 	if len(web.Ports) != 1 || web.Ports[0] != (PortMapping{Host: 8080, Container: 80, Protocol: "tcp"}) {
 		t.Errorf("ports = %+v", web.Ports)

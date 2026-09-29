@@ -169,7 +169,6 @@ func buildSwarmSnapshot(res swarmResources) GraphSnapshot {
 			// an external volume that doesn't belong to the stack.
 			if node.Stack != "" && strings.HasPrefix(m.Source, node.Stack+"_") {
 				vol.Stack = node.Stack
-				vol.Labels = map[string]string{StackNamespaceLabel: node.Stack}
 			}
 			snap.Nodes = append(snap.Nodes, vol)
 		}
