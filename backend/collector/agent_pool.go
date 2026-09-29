@@ -114,7 +114,7 @@ func NewAgentPool(cfg AgentPoolConfig) *AgentPool {
 	if cfg.RequestTimeout <= 0 {
 		cfg.RequestTimeout = defaultAgentRequestTimeout
 	}
-if cfg.Client == nil {
+	if cfg.Client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
 		cfg.Client = &http.Client{Timeout: cfg.RequestTimeout, Transport: transport}
