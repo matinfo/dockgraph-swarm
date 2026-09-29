@@ -165,6 +165,13 @@ type DeltaUpdate struct {
 	EdgesRemoved []string `json:"edgesRemoved,omitempty"`
 }
 
+// ProtocolVersion is the WebSocket wire protocol version carried by every
+// message. Bump it on any change an older frontend cannot safely render; the
+// frontend reloads itself to fetch a matching bundle when it differs.
+//
+// Version 2 adds the "service" and "swarmnode" node types.
+const ProtocolVersion = 2
+
 // WireMessage is the envelope sent over the WebSocket connection.
 // Type is either "snapshot" or "delta", and Data contains the corresponding payload.
 type WireMessage struct {
@@ -175,12 +182,12 @@ type WireMessage struct {
 
 // NewSnapshotMessage wraps a full graph snapshot for WebSocket transmission.
 func NewSnapshotMessage(s GraphSnapshot) WireMessage {
-	return WireMessage{Type: MsgTypeSnapshot, Version: 1, Data: s}
+	return WireMessage{Type: MsgTypeSnapshot, Version: ProtocolVersion, Data: s}
 }
 
 // NewDeltaMessage wraps an incremental update for WebSocket transmission.
 func NewDeltaMessage(d DeltaUpdate) WireMessage {
-	return WireMessage{Type: MsgTypeDelta, Version: 1, Data: d}
+	return WireMessage{Type: MsgTypeDelta, Version: ProtocolVersion, Data: d}
 }
 
 // StateMessage is an internal message passed from the state manager to the

@@ -139,7 +139,7 @@ Clients connect to `/ws` and receive a `WireMessage` envelope:
 ```json
 {
   "type": "snapshot",
-  "version": 1,
+  "version": 2,
   "data": {
     "nodes": [
       { "id": "container:web-1", "type": "container", "name": "web-1", "status": "running", ... }
@@ -152,6 +152,8 @@ Clients connect to `/ws` and receive a `WireMessage` envelope:
 ```
 
 The initial message is always a full `snapshot`. Subsequent updates may be `snapshot` or `delta` (incremental adds/removes/updates).
+
+Every message carries the protocol version (`collector.ProtocolVersion`). Version 2 added the `service` and `swarmnode` node types. The frontend accepts only its own version. On a mismatch it reloads once to fetch a matching bundle, and ignores the messages if the mismatch persists.
 
 ### Graph Model
 
