@@ -71,3 +71,14 @@ describe('STATUS_LABELS', () => {
     }
   });
 });
+
+describe('networkColor with a stack', () => {
+  it('hashes the network name without its {stack}_ prefix', () => {
+    expect(networkColor('shop_backend', 'shop')).toBe(networkColor('backend'));
+    expect(networkColor('shop_backend', 'shop')).toBe(networkColor('blog_backend', 'blog'));
+  });
+
+  it('keeps names without the prefix as-is', () => {
+    expect(networkColor('proxy', 'shop')).toBe(networkColor('proxy'));
+  });
+});

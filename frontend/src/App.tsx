@@ -5,6 +5,9 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { FlowCanvas } from './components/FlowCanvas';
 import { useDockGraph } from './hooks/useDockGraph';
 import { useContainerStats } from './hooks/useContainerStats';
+import { useStackScope } from './hooks/useStackScope';
+import { filterGraphByStack, isWorkload, listStacks } from './utils/stack';
+import type { ContainerStatsData } from './types';
 import { ThemeProvider, useTheme, type Theme } from './theme';
 
 function globalStyles(theme: Theme) {
@@ -135,16 +138,49 @@ body {
 `;
 }
 
+/** Strips the `.{slot|nodeId}.{taskId}` suffix of a per-task stats key. */
+const TASK_KEY_SUFFIX = /\.[^.]+\.[^.]+$/;
+
 function AppContent() {
   const { stats, handleStatsMessage } = useContainerStats();
-  const { nodes, edges, connected, ready } = useDockGraph(handleStatsMessage);
+  const { nodes: allNodes, edges: allEdges, connected, ready } = useDockGraph(handleStatsMessage);
   const { theme } = useTheme();
   const css = useMemo(() => globalStyles(theme), [theme]);
+
+  // Scope everything downstream (graph layout, search, table, dashboard, logs)
+  // to the selected stack. Filtering upstream changes the topology key, so the
+  // ELK layout reruns for the scoped graph on its own.
+  const { selectedStack, setSelectedStack } = useStackScope();
+  const stacks = useMemo(() => listStacks(allNodes), [allNodes]);
+  const { nodes, edges } = useMemo(
+    () => filterGraphByStack(allNodes, allEdges, selectedStack),
+    [allNodes, allEdges, selectedStack],
+  );
+  // Only the scoped workloads' stats (keyed by container/service name, plus
+  // per-task entries `{service}.{slot}.{taskId}` from node agents).
+  const scopedStats = useMemo(() => {
+    if (!selectedStack) return stats;
+    const names = new Set(nodes.filter(isWorkload).map((n) => n.name));
+    const scoped = new Map<string, ContainerStatsData>();
+    for (const [key, value] of stats) {
+      if (names.has(key) || names.has(key.replace(TASK_KEY_SUFFIX, ''))) scoped.set(key, value);
+    }
+    return scoped;
+  }, [stats, nodes, selectedStack]);
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
       <style>{css}</style>
-      <FlowCanvas dgNodes={nodes} dgEdges={edges} connected={connected} ready={ready} statsMap={stats} />
+      <FlowCanvas
+        dgNodes={nodes}
+        dgEdges={edges}
+        connected={connected}
+        ready={ready}
+        statsMap={scopedStats}
+        stacks={stacks}
+        selectedStack={selectedStack}
+        onSelectStack={setSelectedStack}
+      />
     </div>
   );
 }

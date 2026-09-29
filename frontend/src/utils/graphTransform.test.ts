@@ -185,3 +185,32 @@ describe('toReactFlowEdges', () => {
     expect(result[0].style?.stroke).toBeDefined();
   });
 });
+
+describe('swarm services', () => {
+  const nodes: DGNode[] = [
+    { id: 'service:shop_web', type: 'service', name: 'shop_web', status: 'degraded', networkId: 'network:shop_front', stack: 'shop' },
+    { id: 'service:shop_db', type: 'service', name: 'shop_db', status: 'stopped', stack: 'shop' },
+    { id: 'network:shop_front', type: 'network', name: 'shop_front', stack: 'shop' },
+    { id: 'volume:shop_data', type: 'volume', name: 'shop_data' },
+  ];
+  const edges: DGEdge[] = [
+    { id: 'e:vol', type: 'volume_mount', source: 'volume:shop_data', target: 'service:shop_web' },
+    { id: 'e:dep', type: 'depends_on', source: 'service:shop_web', target: 'service:shop_db' },
+  ];
+
+  it('lays services out like containers, as serviceNode', () => {
+    const result = toReactFlowNodes(nodes, edges);
+    const web = result.find((n) => n.id === 'service:shop_web');
+    expect(web?.type).toBe('serviceNode');
+    expect(web?.parentId).toBe('network:shop_front');
+    expect(result.find((n) => n.id === 'network:shop_front')?.type).toBe('networkGroup');
+    // The volume follows its first consumer into the network group.
+    expect(result.find((n) => n.id === 'volume:shop_data')?.parentId).toBe('network:shop_front');
+  });
+
+  it('treats degraded services as active and stopped ones as inactive', () => {
+    const result = toReactFlowEdges(edges, nodes, '#000');
+    expect(result.find((e) => e.id === 'e:vol')?.data?.active).toBe(true);
+    expect(result.find((e) => e.id === 'e:dep')?.data?.active).toBe(false);
+  });
+});

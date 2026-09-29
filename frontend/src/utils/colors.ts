@@ -1,3 +1,4 @@
+import { stripStackPrefix } from './stack';
 import { STATS_CPU_WARN, STATS_CPU_CRIT, STATS_THROTTLE_CRIT } from './constants';
 
 const PALETTE = [
@@ -25,7 +26,14 @@ export function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-export function networkColor(networkName: string): string {
+/**
+ * Deterministic identity colour for a network name. When the owning stack is
+ * given, its `{stack}_` prefix is dropped before hashing so the same logical
+ * network (e.g. `shop_backend` and `blog_backend`) keeps one colour across
+ * stacks.
+ */
+export function networkColor(name: string, stack?: string): string {
+  const networkName = stripStackPrefix(name, stack);
   if (cache.has(networkName)) {
     return cache.get(networkName)!;
   }
@@ -46,6 +54,10 @@ export const STATUS_COLORS: Record<string, string> = {
   dead: '#a855f7',
   created: '#06b6d4',
   not_running: '#64748b',
+  // Swarm service states.
+  degraded: '#f59e0b',
+  updating: '#3b82f6',
+  stopped: '#ef4444',
 };
 
 /** Returns a semantic color for CPU usage: green (ok), amber (warn), red (critical). */
@@ -63,4 +75,7 @@ export const STATUS_LABELS: Record<string, string> = {
   dead: 'Dead',
   created: 'Created',
   not_running: 'Not running',
+  degraded: 'Degraded',
+  updating: 'Updating',
+  stopped: 'Stopped',
 };

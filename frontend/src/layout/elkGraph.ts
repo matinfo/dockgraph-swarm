@@ -47,6 +47,7 @@ export function classifyNodes(nodes: RFNode[]): ClassifiedNodes {
   return { groups, children, freeNodes, childToParent };
 }
 
+/** Service nodes share the container footprint, so only volumes differ. */
 function nodeHeight(rfNode: RFNode): number {
   return rfNode.type === 'volumeNode' ? VOLUME_NODE_HEIGHT : CONTAINER_NODE_HEIGHT;
 }

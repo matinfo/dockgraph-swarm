@@ -22,9 +22,38 @@ export interface ComposeConfig {
   capDrop?: string[];
 }
 
+/** Number of running tasks versus the desired count for a swarm service. */
+export interface ReplicaCount {
+  running: number;
+  desired: number;
+}
+
+/** A single swarm task of a service, placed on a cluster node. */
+export interface TaskInfo {
+  id: string;
+  slot?: number;
+  nodeId?: string;
+  nodeHostname?: string;
+  state?: string;
+  desiredState?: string;
+  containerId?: string;
+  error?: string;
+  timestamp?: string;
+}
+
+/** Swarm service state carried by "service" nodes. */
+export interface ServiceInfo {
+  /** "replicated" | "global" | "replicated-job" | "global-job". */
+  mode?: string;
+  replicas: ReplicaCount;
+  tasks?: TaskInfo[];
+  /** Rolling-update state (e.g. "updating", "completed"); empty when none ran. */
+  updateStatus?: string;
+}
+
 export interface DGNode {
   id: string;
-  type: 'container' | 'network' | 'volume';
+  type: 'container' | 'service' | 'network' | 'volume';
   name: string;
   image?: string;
   status?: string;
@@ -37,6 +66,9 @@ export interface DGNode {
   source?: string;
   createdAt?: string;
   compose?: ComposeConfig;
+  /** Compose project or swarm stack namespace the node belongs to. */
+  stack?: string;
+  service?: ServiceInfo;
 }
 
 export interface DGEdge {
@@ -73,6 +105,13 @@ export interface ContainerNodeData {
   nodeWidth?: number;
   stats?: import('./types/stats').ContainerStatsData;
   onInfoClick?: (containerId: string) => void;
+}
+
+export interface ServiceNodeData {
+  dgNode: DGNode;
+  nodeWidth?: number;
+  stats?: import('./types/stats').ContainerStatsData;
+  onInfoClick?: (serviceId: string) => void;
 }
 
 export interface VolumeNodeData {
