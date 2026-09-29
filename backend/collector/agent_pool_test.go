@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -260,10 +261,28 @@ func TestAgentPoolStartStop(t *testing.T) {
 	p.Stop()
 }
 
-// remoteStub is a RemoteSampler returning fixed samples.
-type remoteStub struct{ samples []ContainerSample }
+// remoteStub is a RemoteSampler returning fixed samples and reporting nodes.
+type remoteStub struct {
+	samples []ContainerSample
+	nodes   []string
+}
 
 func (r remoteStub) Samples(context.Context) []ContainerSample { return r.samples }
+
+func (r remoteStub) ReportingNodes() []string { return r.nodes }
+
+func TestStatsCollectorEmitsIdleReportingNodes(t *testing.T) {
+	sc := NewStatsCollector(&stubDockerClient{}, time.Second, 2)
+	sc.SetLocalNode("n-local", "mgr")
+	sc.SetRemote(remoteStub{nodes: []string{"idle-wrk"}})
+
+	snap := sc.poll(context.Background())
+	for _, key := range []string{"node:mgr", "node:idle-wrk"} {
+		if got, ok := snap.Stats[key]; !ok || got != (ContainerStats{}) {
+			t.Errorf("%s = %+v (present %v), want zero entry", key, got, ok)
+		}
+	}
+}
 
 func TestStatsCollectorMergesRemoteWithoutDoubleCounting(t *testing.T) {
 	stats := sampleStatsResponse(1_000_000, 10_000_000, 2)
@@ -450,5 +469,48 @@ func TestIsNodeSeries(t *testing.T) {
 		if got := IsNodeSeries(key); got != want {
 			t.Errorf("IsNodeSeries(%q) = %v, want %v", key, got, want)
 		}
+	}
+}
+
+func TestAgentPoolReportsAgentOnlyNodes(t *testing.T) {
+	// An agent on a node with no other container reports no samples, yet
+	// its node must still count as reporting.
+	idle := newFakeAgent(t, "node-idle")
+	busy := newFakeAgent(t, "node-busy", taskSample("bbbbbbbbbbbb2", "shop_web.2.t2", "shop_web", "t2", 20, 200))
+	p := newTestPool(&stubResolver{addrs: []string{idle.addr(), busy.addr()}}, "node-local", nil)
+	p.Refresh(context.Background())
+
+	p.Samples(context.Background())
+	if got, want := p.ReportingNodes(), []string{"host-node-busy", "host-node-idle"}; !slices.Equal(got, want) {
+		t.Fatalf("ReportingNodes = %v, want %v", got, want)
+	}
+
+	snap := BuildStatsSnapshot(p.Samples(context.Background()), p.ReportingNodes()...)
+	if got, ok := snap.Stats["node:host-node-idle"]; !ok || got != (ContainerStats{}) {
+		t.Errorf("idle node aggregate = %+v (present %v), want zero entry", got, ok)
+	}
+	if got := snap.Stats["node:host-node-busy"]; got.CPUPercent != 20 || got.MemUsage != 200 {
+		t.Errorf("busy node aggregate = %+v", got)
+	}
+}
+
+func TestAgentPoolReportingClearedWithoutAgents(t *testing.T) {
+	a := newFakeAgent(t, "node-1")
+	res := &stubResolver{addrs: []string{a.addr()}}
+	p := newTestPool(res, "node-local", nil)
+	p.Refresh(context.Background())
+	p.Samples(context.Background())
+	if len(p.ReportingNodes()) != 1 {
+		t.Fatalf("expected one reporting node, got %v", p.ReportingNodes())
+	}
+
+	res.set(nil)
+	res.mu.Lock()
+	res.err = &net.DNSError{Err: "no such host", Name: "tasks.agent", IsNotFound: true}
+	res.mu.Unlock()
+	p.Refresh(context.Background())
+	p.Samples(context.Background())
+	if got := p.ReportingNodes(); len(got) != 0 {
+		t.Errorf("ReportingNodes after agents vanished = %v, want none", got)
 	}
 }

@@ -26,8 +26,10 @@ type StatsCollector struct {
 
 // RemoteSampler supplies container samples from other nodes (per-node agents
 // in swarm mode). Samples must return within its own timeouts and honour ctx.
+// ReportingNodes lists the hostnames that answered the last Samples call.
 type RemoteSampler interface {
 	Samples(ctx context.Context) []ContainerSample
+	ReportingNodes() []string
 }
 
 // SetRemote adds a source of samples from other nodes, merged into every
@@ -125,8 +127,14 @@ func (s *StatsCollector) poll(ctx context.Context) StatsSnapshot {
 			local[i].NodeHostname = s.localHostname
 		}
 	}
-	if remoteCh == nil {
-		return BuildStatsSnapshot(local)
+	var reporting []string
+	if s.localHostname != "" {
+		reporting = append(reporting, s.localHostname)
 	}
-	return BuildStatsSnapshot(mergeSamples(local, <-remoteCh))
+	if remoteCh == nil {
+		return BuildStatsSnapshot(local, reporting...)
+	}
+	remote := <-remoteCh
+	reporting = append(reporting, s.remote.ReportingNodes()...)
+	return BuildStatsSnapshot(mergeSamples(local, remote), reporting...)
 }

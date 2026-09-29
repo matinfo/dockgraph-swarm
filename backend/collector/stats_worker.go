@@ -121,12 +121,19 @@ func PollSamples(ctx context.Context, cli DockerClient, maxWorkers int) []Contai
 // NodeStatsPrefix+hostname, for samples stamped with a node. Aggregates sum
 // CPU, memory, network, block I/O and PIDs across their containers; CPU
 // throttling takes the worst container. A container whose name equals a
-// service name keeps its own entry. Nodes without samples (e.g. no agent)
-// get no aggregate.
-func BuildStatsSnapshot(samples []ContainerSample) StatsSnapshot {
+// service name keeps its own entry. Every hostname in reportingNodes gets a
+// node aggregate even without samples: its agent answered, but DockGraph's
+// own containers are never sampled, so an otherwise empty node has none.
+// Other nodes without samples (e.g. no agent) get no aggregate.
+func BuildStatsSnapshot(samples []ContainerSample, reportingNodes ...string) StatsSnapshot {
 	stats := make(map[string]ContainerStats, len(samples))
 	services := make(map[string]ContainerStats)
 	nodes := make(map[string]ContainerStats)
+	for _, host := range reportingNodes {
+		if host != "" {
+			nodes[NodeStatsPrefix+host] = ContainerStats{}
+		}
+	}
 	for _, s := range samples {
 		stats[s.Name] = s.Stats
 		if svc := s.ServiceName(); svc != "" && !IsNodeSeries(svc) {

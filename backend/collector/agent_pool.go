@@ -97,6 +97,9 @@ type AgentPool struct {
 	// owners maps container IDs, names and task IDs seen in the last remote
 	// stats poll to the node that reported them.
 	owners map[string]string
+	// reporting lists the hostnames of agents that answered the last remote
+	// stats poll, even with no samples (e.g. only the agent runs there).
+	reporting []string
 
 	lastCount int // agents found by the previous refresh; -1 before the first
 	cancel    context.CancelFunc
@@ -269,15 +272,17 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	if len(agents) == 0 {
 		p.mu.Lock()
 		p.owners = make(map[string]string)
+		p.reporting = nil
 		p.mu.Unlock()
 		return nil
 	}
 
 	var (
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		samples []ContainerSample
-		owners  = make(map[string]string)
+		mu        sync.Mutex
+		wg        sync.WaitGroup
+		samples   []ContainerSample
+		owners    = make(map[string]string)
+		reporting []string
 	)
 	for nodeID, a := range agents {
 		wg.Add(1)
@@ -292,6 +297,7 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			reporting = append(reporting, a.hostname)
 			for _, s := range resp.Samples {
 				if s.ID == "" || s.Name == "" {
 					continue
@@ -311,10 +317,20 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	}
 	wg.Wait()
 
+	sort.Strings(reporting)
 	p.mu.Lock()
 	p.owners = owners
+	p.reporting = reporting
 	p.mu.Unlock()
 	return samples
+}
+
+// ReportingNodes returns the hostnames of the remote agents that answered
+// the last Samples round, including those that reported no containers.
+func (p *AgentPool) ReportingNodes() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return append([]string(nil), p.reporting...)
 }
 
 // LocateContainer returns the base URL (http://host:port) of the agent on
