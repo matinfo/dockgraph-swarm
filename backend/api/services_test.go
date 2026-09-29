@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"github.com/docker/docker/api/types/swarm"
 	systemtypes "github.com/docker/docker/api/types/system"
 	"github.com/dockgraph/dockgraph/collector"
+	"github.com/dockgraph/dockgraph/secrets"
 )
 
 func u64(n uint64) *uint64 { return &n }
@@ -24,11 +26,16 @@ func u64(n uint64) *uint64 { return &n }
 func swarmStub() *stubDockerAPI {
 	web := swarm.Service{ID: "svc-web"}
 	web.Spec.Name = "shop_web"
-	web.Spec.Labels = map[string]string{collector.StackNamespaceLabel: "shop"}
+	web.Spec.Labels = map[string]string{
+		collector.StackNamespaceLabel:                   "shop",
+		"traefik.http.routers.web.rule":                 "Host(`shop.example`)",
+		"traefik.http.middlewares.auth.basicauth.users": "admin:$apr1$hash",
+	}
 	web.Spec.Mode.Replicated = &swarm.ReplicatedService{Replicas: u64(2)}
 	web.Spec.TaskTemplate.ContainerSpec = &swarm.ContainerSpec{
 		Image:  "nginx:1.25@sha256:abc",
 		Env:    []string{"MODE=prod", "DB_PASSWORD=hunter2"},
+		Labels: map[string]string{"api_token": "task-secret"},
 		Mounts: []mount.Mount{{Type: mount.TypeVolume, Source: "shop_data", Target: "/data"}},
 	}
 	web.Spec.TaskTemplate.Networks = []swarm.NetworkAttachmentConfig{{Target: "net1", Aliases: []string{"web"}}}
@@ -103,8 +110,13 @@ func TestHandleServiceInspect(t *testing.T) {
 		Networks []map[string]any       `json:"networks"`
 		Mounts   []map[string]any       `json:"mounts"`
 		Ports    []map[string]any       `json:"ports"`
+		Labels   map[string]string      `json:"labels"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatal(err)
 	}
 	if body.ID != "svc-web" || body.Name != "shop_web" || body.Stack != "shop" || body.Mode != "replicated" {
@@ -120,6 +132,16 @@ func TestHandleServiceInspect(t *testing.T) {
 		if e["key"] == "DB_PASSWORD" && e["value"] == "hunter2" {
 			t.Error("secret env value not masked")
 		}
+	}
+	if got := body.Labels["traefik.http.middlewares.auth.basicauth.users"]; got != secrets.Masked {
+		t.Errorf("credential-looking service label not masked: %q", got)
+	}
+	if got := body.Labels["traefik.http.routers.web.rule"]; got != "Host(`shop.example`)" {
+		t.Errorf("ordinary service label changed: %q", got)
+	}
+	// Task-template labels are not used by the UI and must not leak.
+	if bytes.Contains(raw, []byte("containerLabels")) || bytes.Contains(raw, []byte("task-secret")) {
+		t.Errorf("task-template labels exposed: %s", raw)
 	}
 	if len(body.Networks) != 1 || body.Networks[0]["name"] != "shop_front" {
 		t.Errorf("networks = %+v", body.Networks)

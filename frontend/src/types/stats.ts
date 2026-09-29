@@ -119,7 +119,6 @@ export interface ServiceDetail {
   workingDir?: string;
   user?: string;
   env?: { key: string; value: string }[];
-  containerLabels?: Record<string, string> | null;
   mounts?: Mount[];
   constraints?: string[] | null;
   updateStatus?: { state: string; message?: string };

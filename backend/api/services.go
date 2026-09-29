@@ -102,7 +102,7 @@ func buildServiceInspectResponse(ctx context.Context, svc swarm.Service, tasks [
 		"mode":      info.Mode,
 		"replicas":  info.Replicas,
 		"tasks":     info.Tasks,
-		fieldLabels: svc.Spec.Labels,
+		fieldLabels: maskLabels(svc.Spec.Labels),
 		"createdAt": svc.CreatedAt,
 		"updatedAt": svc.UpdatedAt,
 		"ports":     buildServicePorts(svc.Endpoint.Ports),
@@ -119,7 +119,6 @@ func buildServiceInspectResponse(ctx context.Context, svc swarm.Service, tasks [
 		resp["workingDir"] = cs.Dir
 		resp["user"] = cs.User
 		resp["env"] = filterEnvVars(cs.Env)
-		resp["containerLabels"] = cs.Labels
 		resp["mounts"] = buildServiceMounts(cs.Mounts)
 	}
 	if p := svc.Spec.TaskTemplate.Placement; p != nil {
