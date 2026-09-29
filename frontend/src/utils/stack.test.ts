@@ -171,7 +171,7 @@ describe('taskContainerName', () => {
   });
 });
 
-import { isNodeStatsKey, nodeStatsKey, seriesLabel, withoutNodeStats } from './stack';
+import { consumerStats, isNodeStatsKey, nodeStatsKey, seriesLabel, serviceOfTask, withoutNodeStats } from './stack';
 import type { ContainerStatsData } from '../types/stats';
 
 describe('swarm node helpers', () => {
@@ -200,5 +200,34 @@ describe('swarm node helpers', () => {
     expect(filterGraphByStack(nodes, [], 'shop').nodes.map((n) => n.id)).toEqual(['swarmnode:mgr', 'service:shop_web']);
     expect(filterGraphByStack(nodes, [], '_standalone').nodes.map((n) => n.id)).toEqual(['swarmnode:mgr']);
     expect(listStacks(nodes).map((s) => s.name)).toEqual(['blog', 'shop']);
+  });
+});
+
+describe('consumerStats', () => {
+  const id = 'dvikfv6mt2qtwncfvburtsurx'; // 25-char swarm ID
+  const node = 'xqp09okluv16vg9we4allmf4g';
+  const s = {} as ContainerStatsData;
+
+  it('recognises swarm task container names', () => {
+    expect(serviceOfTask(`shop_web.1.${id}`)).toBe('shop_web');
+    expect(serviceOfTask(`shop_web.12.${id}`)).toBe('shop_web');
+    expect(serviceOfTask(`shop_agent.${node}.${id}`)).toBe('shop_agent');
+    expect(serviceOfTask('shop_web')).toBeUndefined();
+    expect(serviceOfTask('shop_web.backup')).toBeUndefined();
+    expect(serviceOfTask('shop_web.1.backup')).toBeUndefined();
+    expect(serviceOfTask(`shop_web.1.${id}.old`)).toBeUndefined();
+  });
+
+  it('counts each workload once', () => {
+    const m = new Map([
+      ['shop_web', s], // service aggregate
+      [`shop_web.1.${id}`, s], // its tasks: covered by the aggregate
+      [`shop_web.2.${id}`, s],
+      [`orphan_svc.1.${id}`, s], // task without an aggregate: kept
+      ['shop_web.backup', s], // standalone container with a dotted name: kept
+      ['db', s],
+      ['node:mgr', s], // node aggregate: dropped
+    ]);
+    expect([...consumerStats(m).keys()]).toEqual(['shop_web', `orphan_svc.1.${id}`, 'shop_web.backup', 'db']);
   });
 });

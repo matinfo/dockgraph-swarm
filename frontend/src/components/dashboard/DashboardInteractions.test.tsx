@@ -82,6 +82,21 @@ describe("TopConsumersCard interactions", () => {
     expect(screen.getByText("web")).toBeDefined();
     expect(screen.queryByText("node:mgr")).toBeNull();
   });
+
+  it("lists a swarm service once, not next to its own tasks", () => {
+    const id = "dvikfv6mt2qtwncfvburtsurx";
+    const statsMap = new Map<string, ContainerStatsData>([
+      ["shop_web", { ...makeStats(), cpuPercent: 80 }], // aggregate of both tasks
+      [`shop_web.1.${id}`, { ...makeStats(), cpuPercent: 50 }],
+      [`shop_web.2.${id}`, { ...makeStats(), cpuPercent: 30 }],
+      ["db", makeStats()],
+    ]);
+    render(<TopConsumersCard statsMap={statsMap} onInspect={vi.fn()} />);
+    expect(screen.getByText("shop_web")).toBeDefined();
+    expect(screen.getByText("db")).toBeDefined();
+    expect(screen.queryByText(`shop_web.1.${id}`)).toBeNull();
+    expect(screen.queryByText(`shop_web.2.${id}`)).toBeNull();
+  });
 });
 
 describe("EventTimelineCard interactions", () => {

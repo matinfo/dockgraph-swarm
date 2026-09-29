@@ -4,7 +4,7 @@ import { DashboardCard } from "./DashboardCard";
 import { ProgressBar } from "./ProgressBar";
 import { METRIC_COLORS } from "./palette";
 import { formatBytes, formatPercent } from "../../utils/format";
-import { isNodeStatsKey } from "../../utils/stack";
+import { consumerStats } from "../../utils/stack";
 import type { ContainerStatsData } from "../../types/stats";
 
 interface Props {
@@ -29,8 +29,9 @@ export const TopConsumersCard = memo(function TopConsumersCard({ statsMap, onIns
   const [hovered, setHovered] = useState<string | null>(null);
 
   const rows = useMemo(() => {
-    // Per-swarm-node aggregates (`node:{hostname}`) are not consumers.
-    const entries: Row[] = Array.from(statsMap.entries()).filter(([name]) => !isNodeStatsKey(name)).map(([name, s]) => ({
+    // Each workload once: no per-node aggregates, and no swarm task series
+    // next to their service aggregate (it already sums them).
+    const entries: Row[] = Array.from(consumerStats(statsMap).entries()).map(([name, s]) => ({
       name,
       cpu: s.cpuPercent,
       mem: s.memUsage,

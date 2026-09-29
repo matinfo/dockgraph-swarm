@@ -56,6 +56,35 @@ export function seriesLabel(key: string): string {
   return isNodeStatsKey(key) ? key.slice(NODE_STATS_PREFIX.length) : key;
 }
 
+/**
+ * Swarm task container names are `{service}.{slot}.{taskId}` (replicated) or
+ * `{service}.{nodeId}.{taskId}` (global); swarm IDs are 25 lowercase base-36
+ * characters. Mirrors the backend's task-name check in stats history.
+ */
+const TASK_NAME = /^([^.]+)\.(?:\d+|[a-z0-9]{25})\.[a-z0-9]{25}$/;
+
+/** Service a swarm task container name belongs to, or undefined for any other name. */
+export function serviceOfTask(name: string): string | undefined {
+  return TASK_NAME.exec(name)?.[1];
+}
+
+/**
+ * Workload entries of the live stats map, each counted once: drops per-node
+ * aggregates, and swarm task series whose service aggregate is present (the
+ * aggregate already sums them). Tasks of a service without an aggregate are
+ * kept, so their usage is never lost.
+ */
+export function consumerStats(stats: Map<string, ContainerStatsData>): Map<string, ContainerStatsData> {
+  const out = new Map<string, ContainerStatsData>();
+  for (const [key, value] of stats) {
+    if (isNodeStatsKey(key)) continue;
+    const svc = serviceOfTask(key);
+    if (svc !== undefined && stats.has(svc)) continue;
+    out.set(key, value);
+  }
+  return out;
+}
+
 /** Returns the stats map without the per-node aggregates (workload entries only). */
 export function withoutNodeStats(stats: Map<string, ContainerStatsData>): Map<string, ContainerStatsData> {
   let hasNode = false;
