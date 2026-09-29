@@ -338,11 +338,11 @@ export function FlowCanvas({
   // match count) surface in the search bar automatically.
   const { clearAll, toggleStatus } = search;
   const handleStatusFilter = useCallback(
-    (status: string) => {
+    (status: string, tab: ResourceTab) => {
       closeDetail();
       clearAll();
       toggleStatus(status);
-      setTableTab("containers");
+      setTableTab(tab);
       setActiveView("table");
     },
     [closeDetail, clearAll, toggleStatus],

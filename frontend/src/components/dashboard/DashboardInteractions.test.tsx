@@ -51,7 +51,7 @@ describe("StatusSummaryCard interactions", () => {
     const onStatusFilter = vi.fn();
     render(<StatusSummaryCard nodes={containers} onStatusFilter={onStatusFilter} onResourceTab={vi.fn()} />);
     fireEvent.click(screen.getByText("Running"));
-    expect(onStatusFilter).toHaveBeenCalledWith("running");
+    expect(onStatusFilter).toHaveBeenCalledWith("running", "containers");
   });
 
   it("opens the matching subtab when a resource total is clicked", () => {
@@ -61,6 +61,45 @@ describe("StatusSummaryCard interactions", () => {
     expect(onResourceTab).toHaveBeenCalledWith("networks");
     fireEvent.click(screen.getByText("Volumes"));
     expect(onResourceTab).toHaveBeenCalledWith("volumes");
+  });
+});
+
+describe("StatusSummaryCard in swarm mode", () => {
+  const swarmNodes: DGNode[] = [
+    { id: "service:shop_web", type: "service", name: "shop_web", status: "running" },
+    { id: "service:shop_api", type: "service", name: "shop_api", status: "degraded" },
+    { id: "service:shop_db", type: "service", name: "shop_db", status: "running" },
+    { id: "container:lone", type: "container", name: "lone", status: "running" }, // not a swarm task
+    { id: "network:app", type: "network", name: "app" },
+  ];
+  const row = (label: string) => screen.getByText(label).closest("button")!;
+
+  it("counts services, not containers", () => {
+    render(<StatusSummaryCard nodes={swarmNodes} swarm onStatusFilter={vi.fn()} onResourceTab={vi.fn()} />);
+    expect(screen.getByText("Services")).toBeTruthy();
+    expect(row("Running").textContent).toContain("2");
+    expect(row("Degraded").textContent).toContain("1");
+    expect(screen.queryByText("Exited")).toBeNull();
+  });
+
+  it("drills into the Services tab", () => {
+    const onStatusFilter = vi.fn();
+    render(<StatusSummaryCard nodes={swarmNodes} swarm onStatusFilter={onStatusFilter} onResourceTab={vi.fn()} />);
+    fireEvent.click(screen.getByText("Degraded"));
+    expect(onStatusFilter).toHaveBeenCalledWith("degraded", "services");
+  });
+
+  it("keeps standalone containers reachable from the totals", () => {
+    const onResourceTab = vi.fn();
+    render(<StatusSummaryCard nodes={swarmNodes} swarm onStatusFilter={vi.fn()} onResourceTab={onResourceTab} />);
+    fireEvent.click(screen.getByText("Containers"));
+    expect(onResourceTab).toHaveBeenCalledWith("containers");
+  });
+
+  it("hides the containers total when there are none", () => {
+    const servicesOnly = swarmNodes.filter((n) => n.type !== "container");
+    render(<StatusSummaryCard nodes={servicesOnly} swarm onStatusFilter={vi.fn()} onResourceTab={vi.fn()} />);
+    expect(screen.queryByText("Containers")).toBeNull();
   });
 });
 
