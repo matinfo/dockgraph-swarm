@@ -261,6 +261,53 @@ func TestAgentPoolStartStop(t *testing.T) {
 	p.Stop()
 }
 
+// While no agent is known, the pool retries well before ResolveInterval, and
+// picks agents up as soon as they register.
+func TestAgentPoolRetriesSoonWithoutAgents(t *testing.T) {
+	a := newFakeAgent(t, "node-1")
+	res := &stubResolver{err: &net.DNSError{Err: "no such host", Name: "tasks.agent", IsNotFound: true}}
+	p := NewAgentPool(AgentPoolConfig{
+		Addr: "tasks.agent", Port: "7801", Token: testAgentToken, Resolver: res,
+		ResolveInterval: time.Hour,
+	})
+	p.retryMin = 5 * time.Millisecond
+	p.Start(context.Background())
+	defer p.Stop()
+
+	time.Sleep(20 * time.Millisecond)
+	res.mu.Lock()
+	res.err = nil
+	res.addrs = []string{a.addr()}
+	res.mu.Unlock()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for p.agentCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("pool did not retry before the hour-long resolve interval")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Once agents are known, the pool waits the full ResolveInterval.
+func TestAgentPoolKeepsIntervalWithAgents(t *testing.T) {
+	a := newFakeAgent(t, "node-1")
+	res := &stubResolver{addrs: []string{a.addr()}}
+	p := NewAgentPool(AgentPoolConfig{
+		Addr: "tasks.agent", Port: "7801", Token: testAgentToken, Resolver: res,
+		ResolveInterval: time.Hour,
+	})
+	p.retryMin = time.Millisecond
+	p.Start(context.Background())
+	time.Sleep(50 * time.Millisecond)
+	p.Stop()
+	res.mu.Lock()
+	defer res.mu.Unlock()
+	if len(res.hosts) != 1 {
+		t.Errorf("resolved %d times, want 1", len(res.hosts))
+	}
+}
+
 // remoteStub is a RemoteSampler returning fixed samples and reporting nodes.
 type remoteStub struct {
 	samples []ContainerSample

@@ -37,9 +37,13 @@ type AgentStats struct {
 // Agent pool defaults.
 const (
 	defaultAgentResolveInterval = 30 * time.Second
-	defaultAgentRequestTimeout  = 5 * time.Second
-	agentResolveTimeout         = 5 * time.Second
-	agentTaskLookupTimeout      = 5 * time.Second
+	// agentRetryMin is the first retry delay while no agent is known (e.g.
+	// the server started before the agent tasks registered in DNS). It
+	// doubles up to ResolveInterval.
+	agentRetryMin              = 2 * time.Second
+	defaultAgentRequestTimeout = 5 * time.Second
+	agentResolveTimeout        = 5 * time.Second
+	agentTaskLookupTimeout     = 5 * time.Second
 	// maxAgentResponseBytes bounds a decoded agent response.
 	maxAgentResponseBytes = 16 << 20
 )
@@ -101,7 +105,8 @@ type AgentPool struct {
 	// stats poll, even with no samples (e.g. only the agent runs there).
 	reporting []string
 
-	lastCount int // agents found by the previous refresh; -1 before the first
+	lastCount int           // agents found by the previous refresh; -1 before the first
+	retryMin  time.Duration // first retry delay while no agent is known
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 }
@@ -127,28 +132,46 @@ func NewAgentPool(cfg AgentPoolConfig) *AgentPool {
 		agents:    make(map[string]agentEndpoint),
 		owners:    make(map[string]string),
 		lastCount: -1,
+		retryMin:  agentRetryMin,
 	}
 }
 
 // Start resolves agents immediately, then every ResolveInterval until ctx is
-// cancelled or Stop is called.
+// cancelled or Stop is called. While no agent is known it retries sooner,
+// from retryMin doubling up to ResolveInterval: the server often starts
+// before the global agent tasks are registered in DNS.
 func (p *AgentPool) Start(ctx context.Context) {
 	ctx, p.cancel = context.WithCancel(ctx)
 	p.Refresh(ctx)
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		ticker := time.NewTicker(p.cfg.ResolveInterval)
-		defer ticker.Stop()
+		retry := p.retryMin
 		for {
+			delay := p.cfg.ResolveInterval
+			if p.agentCount() > 0 {
+				retry = p.retryMin
+			} else if retry < delay {
+				delay = retry
+				retry *= 2
+			}
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				p.Refresh(ctx)
 			}
 		}
 	}()
+}
+
+// agentCount returns how many agents the last refresh found.
+func (p *AgentPool) agentCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.agents)
 }
 
 // Stop ends discovery and waits for the background loop to exit.
@@ -231,10 +254,14 @@ func (p *AgentPool) Refresh(ctx context.Context) {
 	if changed {
 		if len(agents) == 0 {
 			reason := ""
-			if err != nil {
+			switch {
+			case err != nil && isDNSNotFound(err):
+				// Normal right after deploy: agent tasks not registered yet.
+				reason = " (no agent task registered yet)"
+			case err != nil:
 				reason = fmt.Sprintf(" (%v)", err)
 			}
-			log.Printf("agents: 0 via %s%s; stats and logs limited to this node", host, reason)
+			log.Printf("agents: 0 via %s%s; stats and logs limited to this node until agents are found", host, reason)
 		} else {
 			log.Printf("agents: %d via %s", len(agents), host)
 		}
