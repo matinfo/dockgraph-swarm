@@ -97,15 +97,20 @@ export function useGraphLayout(
 
   // Full ELK layout — only when topology (node/edge set) changes.
   useEffect(() => {
-    if (dgNodes.length === 0) return;
     let cancelled = false;
 
-    const { rfNodes, rfEdges } = buildFlow(dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId);
-
-    // The per-node view has a deterministic grid layout (no ELK, no edges).
-    const layoutPromise = groupBy === 'node'
-      ? Promise.resolve({ nodes: layoutNodeGroups(rfNodes), edges: rfEdges })
-      : computeLayout(rfNodes, rfEdges);
+    let layoutPromise: Promise<{ nodes: RFNode[]; edges: RFEdge[] }>;
+    if (dgNodes.length === 0) {
+      // Empty topology (e.g. a stack with no resources): clear the canvas so
+      // the empty state never sits over a stale, still-interactive graph.
+      layoutPromise = Promise.resolve({ nodes: [], edges: [] });
+    } else {
+      const { rfNodes, rfEdges } = buildFlow(dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId);
+      // The per-node view has a deterministic grid layout (no ELK, no edges).
+      layoutPromise = groupBy === 'node'
+        ? Promise.resolve({ nodes: layoutNodeGroups(rfNodes), edges: rfEdges })
+        : computeLayout(rfNodes, rfEdges);
+    }
 
     layoutPromise
       .then((layout) => {
