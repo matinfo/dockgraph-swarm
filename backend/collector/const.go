@@ -36,8 +36,9 @@ const composeProjectLabel = "com.docker.compose.project"
 // Swarm label keys: the stack a resource was deployed with (docker stack
 // deploy), and the task a container runs for.
 const (
-	StackNamespaceLabel = "com.docker.stack.namespace"
-	swarmTaskIDLabel    = "com.docker.swarm.task.id"
+	StackNamespaceLabel   = "com.docker.stack.namespace"
+	swarmTaskIDLabel      = "com.docker.swarm.task.id"
+	swarmServiceNameLabel = "com.docker.swarm.service.name"
 )
 
 // Docker event actions that indicate a topology change.

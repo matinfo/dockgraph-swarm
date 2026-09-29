@@ -14,9 +14,22 @@ type StatsCollector struct {
 	client     DockerClient
 	interval   time.Duration
 	maxWorkers int
+	remote     RemoteSampler
 	updates    chan StatsSnapshot
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
+}
+
+// RemoteSampler supplies container samples from other nodes (per-node agents
+// in swarm mode). Samples must return within its own timeouts and honour ctx.
+type RemoteSampler interface {
+	Samples(ctx context.Context) []ContainerSample
+}
+
+// SetRemote adds a source of samples from other nodes, merged into every
+// snapshot alongside local samples. Must be called before Start.
+func (s *StatsCollector) SetRemote(r RemoteSampler) {
+	s.remote = r
 }
 
 // NewStatsCollector creates a collector that polls container stats at the given interval.
@@ -56,7 +69,7 @@ func (s *StatsCollector) pollLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Initial poll on start.
-	snap := pollAllStats(ctx, s.client, s.maxWorkers)
+	snap := s.poll(ctx)
 	select {
 	case s.updates <- snap:
 	case <-ctx.Done():
@@ -66,7 +79,7 @@ func (s *StatsCollector) pollLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			snap := pollAllStats(ctx, s.client, s.maxWorkers)
+			snap := s.poll(ctx)
 			select {
 			case s.updates <- snap:
 			default:
@@ -78,4 +91,18 @@ func (s *StatsCollector) pollLoop(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// poll samples local containers and, concurrently, the remote sampler, then
+// merges both (local wins on duplicate container IDs) into one snapshot.
+func (s *StatsCollector) poll(ctx context.Context) StatsSnapshot {
+	if s.remote == nil {
+		return pollAllStats(ctx, s.client, s.maxWorkers)
+	}
+	remoteCh := make(chan []ContainerSample, 1)
+	go func() {
+		remoteCh <- s.remote.Samples(ctx)
+	}()
+	local := PollSamples(ctx, s.client, s.maxWorkers)
+	return BuildStatsSnapshot(mergeSamples(local, <-remoteCh))
 }

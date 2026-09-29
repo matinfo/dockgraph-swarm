@@ -26,6 +26,17 @@ type Config struct {
 	// SwarmPollInterval is how often swarm tasks are polled for changes on
 	// remote nodes (DG_SWARM_POLL_INTERVAL, default 5s).
 	SwarmPollInterval time.Duration
+	// AgentPort is the per-node agent's HTTP port (DG_AGENT_PORT, default
+	// 7801). Agents listen on it; the swarm server dials agents on it.
+	AgentPort string
+	// AgentAddr is the DNS name resolving to every agent task
+	// (DG_AGENT_ADDR, default "tasks.agent"), optionally with ":port".
+	AgentAddr string
+	// AgentToken is the shared bearer secret between server and agents,
+	// read from DG_AGENT_TOKEN or the file named by DG_AGENT_TOKEN_FILE
+	// (a Docker secret). Empty disables agents on the server and prevents
+	// an agent from starting.
+	AgentToken string
 }
 
 // validModes lists the accepted DG_MODE values.
@@ -47,19 +58,19 @@ func LoadConfig() Config {
 
 		Mode:              collector.ModeAuto,
 		SwarmPollInterval: 5 * time.Second,
+		AgentPort:         "7801",
+		AgentAddr:         "tasks.agent",
 	}
 
 	if v := os.Getenv("DG_BIND_ADDR"); v != "" {
 		cfg.BindAddr = v
 	}
-	if v := os.Getenv("DG_PORT"); v != "" {
-		port, err := strconv.Atoi(v)
-		if err != nil || port < 1 || port > 65535 {
-			log.Printf("invalid DG_PORT %q, using default %s", v, cfg.Port)
-		} else {
-			cfg.Port = v
-		}
+	cfg.Port = parsePort("DG_PORT", cfg.Port)
+	cfg.AgentPort = parsePort("DG_AGENT_PORT", cfg.AgentPort)
+	if v := strings.TrimSpace(os.Getenv("DG_AGENT_ADDR")); v != "" {
+		cfg.AgentAddr = v
 	}
+	cfg.AgentToken = loadAgentToken()
 
 	cfg.PollInterval = parseDuration("DG_POLL_INTERVAL", cfg.PollInterval, time.Second)
 	cfg.StatsInterval = parseDuration("DG_STATS_INTERVAL", cfg.StatsInterval, time.Second)
@@ -107,6 +118,45 @@ func LoadConfig() Config {
 	}
 
 	return cfg
+}
+
+// parsePort reads a TCP port from an environment variable, keeping fallback
+// when the value is not a valid port number.
+func parsePort(envKey, fallback string) string {
+	v := os.Getenv(envKey)
+	if v == "" {
+		return fallback
+	}
+	port, err := strconv.Atoi(v)
+	if err != nil || port < 1 || port > 65535 {
+		log.Printf("invalid %s %q, using default %s", envKey, v, fallback)
+		return fallback
+	}
+	return v
+}
+
+// loadAgentToken returns the agent shared secret from DG_AGENT_TOKEN, or
+// from the file named by DG_AGENT_TOKEN_FILE (surrounding whitespace, such as
+// a trailing newline, is trimmed). The inline variable wins when both are set.
+// An unreadable file yields an empty token, which agent mode refuses.
+func loadAgentToken() string {
+	token := strings.TrimSpace(os.Getenv("DG_AGENT_TOKEN"))
+	path := strings.TrimSpace(os.Getenv("DG_AGENT_TOKEN_FILE"))
+	if token != "" {
+		if path != "" {
+			log.Println("WARN  both DG_AGENT_TOKEN and DG_AGENT_TOKEN_FILE are set, using DG_AGENT_TOKEN")
+		}
+		return token
+	}
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("WARN  cannot read DG_AGENT_TOKEN_FILE: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // parseDuration reads a duration from an environment variable with minimum enforcement.

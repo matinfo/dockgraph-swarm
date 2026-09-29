@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -71,6 +73,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 		"DG_BIND_ADDR", "DG_PORT", "DG_POLL_INTERVAL",
 		"DG_COMPOSE_PATH", "DG_PASSWORD", "DG_STATS_INTERVAL",
 		"DG_STATS_WORKERS", "DG_MODE", "DG_SWARM_POLL_INTERVAL",
+		"DG_AGENT_PORT", "DG_AGENT_ADDR", "DG_AGENT_TOKEN", "DG_AGENT_TOKEN_FILE",
 	} {
 		t.Setenv(key, "")
 	}
@@ -105,6 +108,15 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 	if cfg.SwarmPollInterval != 5*time.Second {
 		t.Errorf("SwarmPollInterval: got %v, want 5s", cfg.SwarmPollInterval)
+	}
+	if cfg.AgentPort != "7801" {
+		t.Errorf("AgentPort: got %s, want 7801", cfg.AgentPort)
+	}
+	if cfg.AgentAddr != "tasks.agent" {
+		t.Errorf("AgentAddr: got %s, want tasks.agent", cfg.AgentAddr)
+	}
+	if cfg.AgentToken != "" {
+		t.Errorf("AgentToken: got %q, want empty", cfg.AgentToken)
 	}
 }
 
@@ -435,6 +447,72 @@ func TestLoadConfig_SwarmPollInterval(t *testing.T) {
 			t.Setenv("DG_SWARM_POLL_INTERVAL", tt.val)
 			if got := LoadConfig().SwarmPollInterval; got != tt.want {
 				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DG_AGENT_PORT / DG_AGENT_ADDR / DG_AGENT_TOKEN(_FILE)
+// ---------------------------------------------------------------------------
+
+func TestLoadConfig_AgentPort(t *testing.T) {
+	tests := []struct {
+		name string
+		val  string
+		want string
+	}{
+		{"default", "", "7801"},
+		{"custom", "9000", "9000"},
+		{"zero", "0", "7801"},
+		{"too_high", "70000", "7801"},
+		{"not_a_number", "abc", "7801"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t, "DG_PASSWORD")
+			t.Setenv("DG_AGENT_PORT", tt.val)
+			if got := LoadConfig().AgentPort; got != tt.want {
+				t.Errorf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_AgentAddr(t *testing.T) {
+	clearConfigEnv(t, "DG_PASSWORD")
+	t.Setenv("DG_AGENT_ADDR", " tasks.dg_agent:9000 ")
+	if got := LoadConfig().AgentAddr; got != "tasks.dg_agent:9000" {
+		t.Errorf("got %q, want tasks.dg_agent:9000", got)
+	}
+}
+
+func TestLoadConfig_AgentToken(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenFile, []byte("from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		token string
+		file  string
+		want  string
+	}{
+		{"unset", "", "", ""},
+		{"inline", " inline-secret ", "", "inline-secret"},
+		{"file_trimmed", "", tokenFile, "from-file"},
+		{"inline_wins", "inline-secret", tokenFile, "inline-secret"},
+		{"missing_file", "", filepath.Join(dir, "missing"), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t, "DG_PASSWORD")
+			t.Setenv("DG_AGENT_TOKEN", tt.token)
+			t.Setenv("DG_AGENT_TOKEN_FILE", tt.file)
+			if got := LoadConfig().AgentToken; got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}

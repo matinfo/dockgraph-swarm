@@ -366,7 +366,7 @@ func TestHandleStatsHistoryStackFilter(t *testing.T) {
 		{Names: []string{"/shop-web-1"}, Labels: map[string]string{"com.docker.compose.project": "shop"}},
 		{Names: []string{"/blog-app-1"}, Labels: map[string]string{collector.StackNamespaceLabel: "blog"}},
 	}}
-	handler := HandleStatsHistory(h, lister)
+	handler := HandleStatsHistory(h, lister, nil)
 
 	tests := []struct {
 		query string
@@ -401,6 +401,33 @@ func TestHandleStatsHistoryStackFilter(t *testing.T) {
 	handler(rec, httptest.NewRequest(http.MethodGet, "/api/stats/history?stack=a/b", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid stack: status %d", rec.Code)
+	}
+}
+
+func TestHandleStatsHistoryStackFilterSwarm(t *testing.T) {
+	h := collector.NewStatsHistory(24 * time.Hour)
+	h.Record(time.Now().Add(-time.Minute), collector.StatsSnapshot{Stats: map[string]collector.ContainerStats{
+		"shop_web":          {CPUPercent: 3}, // service aggregate
+		"shop_web.2.remote": {CPUPercent: 2}, // task on another node
+		"shop_webx":         {CPUPercent: 9}, // unrelated look-alike
+		"blog_app":          {CPUPercent: 1},
+	}})
+	services := &stubDockerAPI{services: []swarm.Service{
+		{ID: "s1", Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{Name: "shop_web", Labels: map[string]string{collector.StackNamespaceLabel: "shop"}}}},
+		{ID: "s2", Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{Name: "blog_app", Labels: map[string]string{collector.StackNamespaceLabel: "blog"}}}},
+	}}
+	handler := HandleStatsHistory(h, mockLister{}, services)
+
+	rec := httptest.NewRecorder()
+	handler(rec, httptest.NewRequest(http.MethodGet, "/api/stats/history?range=5m&stack=shop", nil))
+	var body struct {
+		Containers map[string]any `json:"containers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Containers) != 2 || body.Containers["shop_web"] == nil || body.Containers["shop_web.2.remote"] == nil {
+		t.Errorf("containers = %v, want shop_web and shop_web.2.remote", body.Containers)
 	}
 }
 

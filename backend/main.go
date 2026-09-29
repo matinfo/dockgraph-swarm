@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
+	"github.com/dockgraph/dockgraph/agent"
 	"github.com/dockgraph/dockgraph/api"
 	"github.com/dockgraph/dockgraph/auth"
 	"github.com/dockgraph/dockgraph/collector"
@@ -67,6 +68,9 @@ func main() {
 		fmt.Println("  DG_STATS_WORKERS   Max concurrent stats calls (default: 50)")
 		fmt.Println("  DG_MODE            auto | standalone | swarm | agent (default: auto)")
 		fmt.Println("  DG_SWARM_POLL_INTERVAL  Swarm task poll interval (default: 5s)")
+		fmt.Println("  DG_AGENT_PORT      Per-node agent HTTP port (default: 7801)")
+		fmt.Println("  DG_AGENT_ADDR      DNS name resolving to all agents (default: tasks.agent)")
+		fmt.Println("  DG_AGENT_TOKEN     Shared agent secret (or DG_AGENT_TOKEN_FILE; required in agent mode)")
 		os.Exit(0)
 	}
 
@@ -74,7 +78,11 @@ func main() {
 
 	if len(os.Args) > 1 && os.Args[1] == "--healthcheck" {
 		httpClient := &http.Client{Timeout: 5 * time.Second}
-		resp, err := httpClient.Get("http://localhost:" + cfg.Port + "/healthz")
+		port := cfg.Port
+		if cfg.Mode == collector.ModeAgent {
+			port = cfg.AgentPort
+		}
+		resp, err := httpClient.Get("http://localhost:" + port + "/healthz")
 		if err != nil {
 			os.Exit(1)
 		}
@@ -83,13 +91,6 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(0)
-	}
-
-	if cfg.PasswordHash == "" {
-		log.Println("WARN  Authentication is disabled. Set DG_PASSWORD to enable protection.")
-		log.Println("WARN  Tip: generate a strong password with: openssl rand -base64 24")
-	} else {
-		log.Println("INFO  Authentication enabled")
 	}
 
 	dockerCli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -101,13 +102,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	mode := detectMode(ctx, cfg.Mode, dockerCli)
+	mode, swarmInfo := detectMode(ctx, cfg.Mode, dockerCli)
 	if mode == collector.ModeAgent {
-		log.Println("agent mode is not implemented yet")
-		os.Exit(1)
+		runAgent(ctx, cfg, dockerCli)
+		return
 	}
 	swarmMode := mode == collector.ModeSwarm
 	log.Printf("INFO  Running in %s mode", mode)
+
+	if cfg.PasswordHash == "" {
+		log.Println("WARN  Authentication is disabled. Set DG_PASSWORD to enable protection.")
+		log.Println("WARN  Tip: generate a strong password with: openssl rand -base64 24")
+	} else {
+		log.Println("INFO  Authentication enabled")
+	}
 
 	mgr := state.NewManager()
 
@@ -144,6 +152,24 @@ func main() {
 	}
 
 	sc := collector.NewStatsCollector(dockerCli, cfg.StatsInterval, cfg.StatsWorkers)
+	var serverOpts []api.ServerOption
+	if swarmMode {
+		if cfg.AgentToken == "" {
+			log.Println("INFO  DG_AGENT_TOKEN not set: agents disabled, stats and container logs limited to this node")
+		} else {
+			pool := collector.NewAgentPool(collector.AgentPoolConfig{
+				Addr:        cfg.AgentAddr,
+				Port:        cfg.AgentPort,
+				Token:       cfg.AgentToken,
+				LocalNodeID: swarmInfo.NodeID,
+				Tasks:       dockerCli,
+			})
+			pool.Start(ctx)
+			defer pool.Stop()
+			sc.SetRemote(pool)
+			serverOpts = append(serverOpts, api.WithAgentProxy(&api.AgentProxy{Locator: pool, Token: cfg.AgentToken}))
+		}
+	}
 	sc.Start(ctx)
 	defer sc.Stop()
 
@@ -212,7 +238,7 @@ func main() {
 	}
 
 	systemCache := api.NewCachedSystemData(ctx, dockerCli, 5*time.Minute, 60*time.Second)
-	handler := api.NewServer(hub, staticFS, &dockerHealth{cli: dockerCli}, authService, dockerCli, systemCache, statsHistory, eventHistory, mode)
+	handler := api.NewServer(hub, staticFS, &dockerHealth{cli: dockerCli}, authService, dockerCli, systemCache, statsHistory, eventHistory, mode, serverOpts...)
 	addr := cfg.BindAddr + ":" + cfg.Port
 	server := &http.Server{
 		Addr:              addr,
@@ -235,6 +261,53 @@ func main() {
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+// runAgent serves the per-node agent API (DG_MODE=agent) until ctx is
+// cancelled. It exits when no agent token is configured.
+func runAgent(ctx context.Context, cfg Config, dockerCli *client.Client) {
+	srv, err := agent.New(dockerCli, agent.Config{
+		Token:         cfg.AgentToken,
+		StatsInterval: cfg.StatsInterval,
+		StatsWorkers:  cfg.StatsWorkers,
+		Health:        &dockerHealth{cli: dockerCli},
+	})
+	if err != nil {
+		log.Fatalf("agent: %v", err)
+	}
+	log.Println("INFO  Running in agent mode")
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer logRecover("agentStats")
+		srv.Run(runCtx)
+	}()
+
+	addr := cfg.BindAddr + ":" + cfg.AgentPort
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Handler(),
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+
+	log.Printf("dockgraph agent listening on %s", addr)
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		log.Printf("agent server: %v", err)
+	}
+	cancel()
+	<-done
 }
 
 // pipeStatsWithHistory forwards stats snapshots to the WebSocket hub and records
@@ -260,7 +333,7 @@ func pipeStatsWithHistory(ctx context.Context, sc *collector.StatsCollector, hub
 // detectMode resolves DG_MODE against the daemon's swarm state, exiting on
 // an unusable combination (e.g. auto on a swarm worker). If the daemon can't
 // be queried, auto falls back to standalone.
-func detectMode(ctx context.Context, requested string, cli *client.Client) string {
+func detectMode(ctx context.Context, requested string, cli *client.Client) (string, swarm.Info) {
 	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var sw swarm.Info
@@ -273,7 +346,7 @@ func detectMode(ctx context.Context, requested string, cli *client.Client) strin
 	if err != nil {
 		log.Fatalf("mode detection: %v", err)
 	}
-	return mode
+	return mode, sw
 }
 
 // pipeEvents subscribes to Docker events and records them in the event history
