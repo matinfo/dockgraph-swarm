@@ -16,8 +16,8 @@ import type { NodeServiceCardData } from '../types';
  *   ┌ Managers ─────────────────────────┐   all managers on one row
  *   │ [box] [box] [box]                 │
  *   └───────────────────────────────────┘
- *   ┌ Workers ──────────────────────────┐   workers wrap every 7 boxes
- *   │ [box] [box] ... [box]  (7 max)    │
+ *   ┌ Workers ──────────────────────────┐   workers wrap every 5 boxes
+ *   │ [box] [box] ... [box]  (5 max)    │
  *   │ [box] [box]                       │
  *   └───────────────────────────────────┘
  *   [Unassigned]                            free-standing, below workers
@@ -39,7 +39,7 @@ export const CARD_GAP = 8;
 export const BOX_GAP_X = 20;
 export const BOX_GAP_Y = 20;
 /** Maximum worker boxes per row before wrapping. Managers never wrap. */
-export const MAX_WORKERS_PER_ROW = 7;
+export const MAX_WORKERS_PER_ROW = 5;
 /** Role group padding: room for the title tab on top, a grab margin around. */
 export const ROLE_GROUP_PADDING_TOP = 40;
 export const ROLE_GROUP_PADDING_X = 18;

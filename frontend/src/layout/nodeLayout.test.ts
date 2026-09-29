@@ -64,18 +64,18 @@ describe('layoutNodeGroups', () => {
     const pos = workers.map((w) => byId(laid, w.id).position);
     const rows = [...new Set(pos.map((p) => p.y))];
     expect(rows).toHaveLength(2);
-    expect(pos.filter((p) => p.y === rows[0])).toHaveLength(7);
-    expect(pos.filter((p) => p.y === rows[1])).toHaveLength(2);
+    expect(pos.filter((p) => p.y === rows[0])).toHaveLength(5);
+    expect(pos.filter((p) => p.y === rows[1])).toHaveLength(4);
     // Columns line up across rows.
-    expect(pos[7].x).toBe(pos[0].x);
-    expect(size(wg).w).toBe(7 * NODE_BOX_WIDTH + 6 * BOX_GAP_X + 2 * ROLE_GROUP_PADDING_X);
+    expect(pos[MAX_WORKERS_PER_ROW].x).toBe(pos[0].x);
+    expect(size(wg).w).toBe(MAX_WORKERS_PER_ROW * NODE_BOX_WIDTH + (MAX_WORKERS_PER_ROW - 1) * BOX_GAP_X + 2 * ROLE_GROUP_PADDING_X);
   });
 
   it('gives every box the same width and every box in a row the row height', () => {
     const boxes = laid.filter((n) => n.type === 'nodeGroup');
     expect(new Set(boxes.map((b) => size(b).w))).toEqual(new Set([NODE_BOX_WIDTH]));
-    const firstRow = workers.slice(0, 7).map((w) => size(byId(laid, w.id)).h);
-    // w1 holds a two-task card, which sets the row height for all seven.
+    const firstRow = workers.slice(0, MAX_WORKERS_PER_ROW).map((w) => size(byId(laid, w.id)).h);
+    // w1 holds a two-task card, which sets the row height for the whole row.
     const expected = NODE_BOX_HEADER_HEIGHT + serviceCardHeight(2) + NODE_BOX_PADDING;
     expect(new Set(firstRow)).toEqual(new Set([Math.max(NODE_BOX_MIN_HEIGHT, expected)]));
   });
