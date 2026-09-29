@@ -581,8 +581,18 @@ func taskFingerprint(tasks []swarm.Task, nodes []swarm.Node) uint64 {
 // service inspect API) outside the snapshot path.
 func SummarizeService(svc swarm.Service, tasks []swarm.Task, nodes []swarm.Node) (*ServiceInfo, string) {
 	info := buildServiceInfo(svc, tasks, nodeHostnames(nodes), countEligibleNodes(nodes))
-	return info, serviceStatus(info.Replicas.Running, info.Replicas.Desired, svc.UpdateStatus)
+	return info, ServiceStatusOf(svc, info.Replicas)
 }
+
+// ServiceStatusOf derives a service's display status from its replica counts
+// and rolling-update state.
+func ServiceStatusOf(svc swarm.Service, replicas ReplicaCount) string {
+	return serviceStatus(replicas.Running, replicas.Desired, svc.UpdateStatus)
+}
+
+// ServiceStatusUnknown is the status of a service whose replica counts could
+// not be determined.
+const ServiceStatusUnknown = "unknown"
 
 // swarmServiceIDLabel is set on task containers to their service's ID.
 const swarmServiceIDLabel = "com.docker.swarm.service.id"

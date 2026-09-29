@@ -89,7 +89,7 @@ export function DetailPanelService({ detail, statsMap, active, onNavigate }: Pro
       <Section title="Replicas">
         <Row
           label="Running"
-          value={`${detail.replicas.running} / ${detail.replicas.desired}`}
+          value={detail.replicas ? `${detail.replicas.running} / ${detail.replicas.desired}` : 'Unknown'}
           mono={mono}
           subtext={theme.nodeSubtext}
         />
@@ -107,8 +107,10 @@ export function DetailPanelService({ detail, statsMap, active, onNavigate }: Pro
         )}
       </Section>
 
-      <Section title={`Tasks (${tasks.length})`}>
-        {tasks.length === 0 ? (
+      <Section title={detail.tasksUnavailable ? 'Tasks' : `Tasks (${tasks.length})`}>
+        {detail.tasksUnavailable ? (
+          <div style={{ fontSize: 11, color: theme.nodeSubtext }}>Tasks unavailable.</div>
+        ) : tasks.length === 0 ? (
           <div style={{ fontSize: 11, color: theme.nodeSubtext }}>No tasks.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, color: theme.panelText }}>

@@ -103,11 +103,14 @@ export interface ServiceDetail {
   id: string;
   name: string;
   stack?: string;
-  /** "running" | "degraded" | "updating" | "stopped". */
+  /** "running" | "degraded" | "updating" | "stopped", or "unknown" when the counts can't be read. */
   status: string;
   mode?: string;
-  replicas: import('../types').ReplicaCount;
+  /** Null when swarm couldn't report the counts. */
+  replicas: import('../types').ReplicaCount | null;
   tasks: import('../types').TaskInfo[];
+  /** True when the task list could not be read: `tasks` is empty, not known empty. */
+  tasksUnavailable?: boolean;
   labels?: Record<string, string> | null;
   createdAt?: string;
   updatedAt?: string;

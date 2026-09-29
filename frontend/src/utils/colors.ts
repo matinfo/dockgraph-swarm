@@ -99,6 +99,7 @@ export const STATUS_COLORS: Record<string, string> = {
   degraded: '#f59e0b',
   updating: '#3b82f6',
   stopped: '#ef4444',
+  unknown: '#64748b',
 };
 
 /** Returns a semantic color for CPU usage: green (ok), amber (warn), red (critical). */
@@ -119,4 +120,5 @@ export const STATUS_LABELS: Record<string, string> = {
   degraded: 'Degraded',
   updating: 'Updating',
   stopped: 'Stopped',
+  unknown: 'Unknown',
 };

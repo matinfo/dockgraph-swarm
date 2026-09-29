@@ -22,6 +22,7 @@ type ServiceInspector interface {
 	ServiceInspectWithRaw(ctx context.Context, serviceID string, opts swarm.ServiceInspectOptions) (swarm.Service, []byte, error)
 	TaskList(ctx context.Context, options swarm.TaskListOptions) ([]swarm.Task, error)
 	NodeList(ctx context.Context, options swarm.NodeListOptions) ([]swarm.Node, error)
+	ServiceList(ctx context.Context, options swarm.ServiceListOptions) ([]swarm.Service, error)
 }
 
 // ServiceLogger reads the aggregated logs of every task of a swarm service.
@@ -62,19 +63,25 @@ func HandleServiceInspect(inspector ServiceInspector, networks NetworkInspector)
 		}
 
 		// Tasks and nodes are best-effort: the service itself is still useful
-		// without placement details.
+		// without placement details. A failed list is not an empty one,
+		// though: it must not turn into 0 running replicas.
 		tasks, err := inspector.TaskList(ctx, swarm.TaskListOptions{
 			Filters: filters.NewArgs(filters.Arg("service", svc.ID)),
 		})
+		tasksOK := err == nil
 		if err != nil {
 			log.Printf("service tasks %s: %v", id, err)
 		}
 		nodes, err := inspector.NodeList(ctx, swarm.NodeListOptions{})
+		nodesOK := err == nil
 		if err != nil {
 			log.Printf("service nodes %s: %v", id, err)
 		}
 
 		resp := buildServiceInspectResponse(ctx, svc, tasks, nodes, networks)
+		if !tasksOK || !nodesOK {
+			fillReplicasFallback(ctx, inspector, svc, resp, tasksOK, nodesOK)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	}
@@ -91,6 +98,60 @@ func HandleServiceLogs(logger ServiceLogger) http.HandlerFunc {
 	return handleLogsStream("service", logger.ServiceLogs)
 }
 
+// fillReplicasFallback corrects the replica counts and status of an inspect
+// response built from a failed task or node list. The running count comes
+// from the tasks, and a global service's desired count from the nodes; when
+// either is missing, swarm's own counts (ServiceList with Status) stand in.
+// If those are unavailable too, the status is unknown and replicas null.
+func fillReplicasFallback(ctx context.Context, inspector ServiceInspector, svc swarm.Service, resp map[string]any, tasksOK, nodesOK bool) {
+	replicas, _ := resp["replicas"].(collector.ReplicaCount)
+	runningOK := tasksOK
+	// Replicated desired counts come from the spec, job counts from the
+	// service status: only global services need the node list.
+	desiredOK := nodesOK || svc.Spec.Mode.Global == nil
+	if !tasksOK {
+		resp["tasksUnavailable"] = true
+	}
+	if !runningOK || !desiredOK {
+		if st := serviceStatusCounts(ctx, inspector, svc.ID); st != nil {
+			if !runningOK {
+				replicas.Running = int(st.RunningTasks)
+				runningOK = true
+			}
+			if !desiredOK {
+				replicas.Desired = int(st.DesiredTasks)
+				desiredOK = true
+			}
+		}
+	}
+	if !runningOK || !desiredOK {
+		resp["replicas"] = nil
+		resp[fieldStatus] = collector.ServiceStatusUnknown
+		return
+	}
+	resp["replicas"] = replicas
+	resp[fieldStatus] = collector.ServiceStatusOf(svc, replicas)
+}
+
+// serviceStatusCounts returns swarm's running/desired task counts for a
+// service, or nil when they can't be read.
+func serviceStatusCounts(ctx context.Context, lister ServiceLister, serviceID string) *swarm.ServiceStatus {
+	services, err := lister.ServiceList(ctx, swarm.ServiceListOptions{
+		Filters: filters.NewArgs(filters.Arg("id", serviceID)),
+		Status:  true,
+	})
+	if err != nil {
+		log.Printf("service status %s: %v", serviceID, err)
+		return nil
+	}
+	for _, s := range services {
+		if s.ID == serviceID {
+			return s.ServiceStatus
+		}
+	}
+	return nil
+}
+
 func buildServiceInspectResponse(ctx context.Context, svc swarm.Service, tasks []swarm.Task, nodes []swarm.Node, networks NetworkInspector) map[string]any {
 	info, status := collector.SummarizeService(svc, tasks, nodes)
 
@@ -101,12 +162,14 @@ func buildServiceInspectResponse(ctx context.Context, svc swarm.Service, tasks [
 		fieldStatus: status,
 		"mode":      info.Mode,
 		"replicas":  info.Replicas,
-		"tasks":     info.Tasks,
-		fieldLabels: maskLabels(svc.Spec.Labels),
-		"createdAt": svc.CreatedAt,
-		"updatedAt": svc.UpdatedAt,
-		"ports":     buildServicePorts(svc.Endpoint.Ports),
-		"networks":  buildServiceNetworks(ctx, svc, networks),
+		// Set to true when the task list could not be read.
+		"tasksUnavailable": false,
+		"tasks":            info.Tasks,
+		fieldLabels:        maskLabels(svc.Spec.Labels),
+		"createdAt":        svc.CreatedAt,
+		"updatedAt":        svc.UpdatedAt,
+		"ports":            buildServicePorts(svc.Endpoint.Ports),
+		"networks":         buildServiceNetworks(ctx, svc, networks),
 	}
 	if info.Tasks == nil {
 		resp["tasks"] = []collector.TaskInfo{}
