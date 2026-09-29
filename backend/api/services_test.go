@@ -413,11 +413,12 @@ func TestHandleStatsHistoryStackFilter(t *testing.T) {
 func TestHandleStatsHistoryStackFilterSwarm(t *testing.T) {
 	h := collector.NewStatsHistory(24 * time.Hour)
 	h.Record(time.Now().Add(-time.Minute), collector.StatsSnapshot{Stats: map[string]collector.ContainerStats{
-		"shop_web":          {CPUPercent: 3}, // service aggregate
-		"shop_web.2.remote": {CPUPercent: 2}, // task on another node
-		"shop_webx":         {CPUPercent: 9}, // unrelated look-alike
-		"blog_app":          {CPUPercent: 1},
-		"node:shop_web":     {CPUPercent: 5}, // node aggregate, never stack-scoped
+		"shop_web":                             {CPUPercent: 3}, // service aggregate
+		"shop_web.2.dvikfv6mt2qtwncfvburtsurx": {CPUPercent: 2}, // task on another node
+		"shop_webx":                            {CPUPercent: 9}, // unrelated look-alike
+		"shop_web.backup":                      {CPUPercent: 7}, // standalone container with a dotted name
+		"blog_app":                             {CPUPercent: 1},
+		"node:shop_web":                        {CPUPercent: 5}, // node aggregate, never stack-scoped
 	}})
 	services := &stubDockerAPI{services: []swarm.Service{
 		{ID: "s1", Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{Name: "shop_web", Labels: map[string]string{collector.StackNamespaceLabel: "shop"}}}},
@@ -433,8 +434,34 @@ func TestHandleStatsHistoryStackFilterSwarm(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Containers) != 2 || body.Containers["shop_web"] == nil || body.Containers["shop_web.2.remote"] == nil {
-		t.Errorf("containers = %v, want shop_web and shop_web.2.remote", body.Containers)
+	if len(body.Containers) != 2 || body.Containers["shop_web"] == nil || body.Containers["shop_web.2.dvikfv6mt2qtwncfvburtsurx"] == nil {
+		t.Errorf("containers = %v, want shop_web and its task", body.Containers)
+	}
+}
+
+func TestIsServiceSeries(t *testing.T) {
+	services := map[string]bool{"shop_web": true, "shop_agent": true}
+	const id = "dvikfv6mt2qtwncfvburtsurx" // 25-char swarm ID
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"shop_web", true},                                   // service aggregate
+		{"shop_web.1." + id, true},                           // replicated task
+		{"shop_web.12." + id, true},                          // multi-digit slot
+		{"shop_agent.xqp09okluv16vg9we4allmf4g." + id, true}, // global task (node ID)
+		{"shop_web.backup", false},                           // dotted standalone name
+		{"shop_web.1.backup", false},                         // not a task ID
+		{"shop_web.1." + id + ".old", false},                 // extra segment
+		{"shop_web.XQP09OKLUV16VG9WE4ALLMF4G." + id, false},  // IDs are lowercase
+		{"shop_webx.1." + id, false},                         // other service
+		{"blog_app.1." + id, false},                          // service not in stack
+		{"shop_web.", false},
+	}
+	for _, tt := range tests {
+		if got := isServiceSeries(tt.name, services); got != tt.want {
+			t.Errorf("isServiceSeries(%q) = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 

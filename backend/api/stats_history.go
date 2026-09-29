@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -148,17 +149,19 @@ func stackServiceNames(ctx context.Context, services ServiceLister, stack string
 	return names, nil
 }
 
+// taskSuffix matches what follows "{service}." in a swarm task container
+// name: the slot (replicated) or the node ID (global), then the task ID.
+// Swarm object IDs are 25 lowercase base-36 characters.
+var taskSuffix = regexp.MustCompile(`^(?:[0-9]+|[a-z0-9]{25})\.[a-z0-9]{25}$`)
+
 // isServiceSeries reports whether a stats series belongs to one of the
 // services: its aggregate (the service name) or one of its task containers
-// ({service}.{slot|node}.{taskID}).
+// ({service}.{slot|nodeID}.{taskID}). Container names may contain dots, so a
+// bare "{service}." prefix is not enough: "shop_api.backup" is not a task.
 func isServiceSeries(name string, services map[string]bool) bool {
 	if services[name] {
 		return true
 	}
-	for svc := range services {
-		if strings.HasPrefix(name, svc+".") {
-			return true
-		}
-	}
-	return false
+	svc, rest, ok := strings.Cut(name, ".")
+	return ok && services[svc] && taskSuffix.MatchString(rest)
 }
