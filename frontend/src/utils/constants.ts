@@ -6,6 +6,9 @@ export const CONTAINER_NODE_HEIGHT = 84;
 /** Fixed height for volume nodes in the ELK layout. */
 export const VOLUME_NODE_HEIGHT = 40;
 
+/** Fixed height for swarm task cards in the per-node graph view. */
+export const TASK_NODE_HEIGHT = 44;
+
 /** Opacity for nodes unrelated to the current selection. */
 export const FADE_OPACITY = 0.2;
 

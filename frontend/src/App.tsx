@@ -6,7 +6,7 @@ import { FlowCanvas } from './components/FlowCanvas';
 import { useDockGraph } from './hooks/useDockGraph';
 import { useContainerStats } from './hooks/useContainerStats';
 import { useStackScope } from './hooks/useStackScope';
-import { filterGraphByStack, isWorkload, listStacks } from './utils/stack';
+import { filterGraphByStack, isNodeStatsKey, isWorkload, listStacks } from './utils/stack';
 import type { ContainerStatsData } from './types';
 import { ThemeProvider, useTheme, type Theme } from './theme';
 
@@ -157,13 +157,16 @@ function AppContent() {
     [allNodes, allEdges, selectedStack],
   );
   // Only the scoped workloads' stats (keyed by container/service name, plus
-  // per-task entries `{service}.{slot}.{taskId}` from node agents).
+  // per-task entries `{service}.{slot}.{taskId}` from node agents). The
+  // per-swarm-node aggregates (`node:{hostname}`) belong to no stack and are
+  // passed through untouched: swarm nodes stay visible in every scope, and
+  // consumer lists (top consumers, alerts) drop them themselves.
   const scopedStats = useMemo(() => {
     if (!selectedStack) return stats;
     const names = new Set(nodes.filter(isWorkload).map((n) => n.name));
     const scoped = new Map<string, ContainerStatsData>();
     for (const [key, value] of stats) {
-      if (names.has(key) || names.has(key.replace(TASK_KEY_SUFFIX, ''))) scoped.set(key, value);
+      if (isNodeStatsKey(key) || names.has(key) || names.has(key.replace(TASK_KEY_SUFFIX, ''))) scoped.set(key, value);
     }
     return scoped;
   }, [stats, nodes, selectedStack]);

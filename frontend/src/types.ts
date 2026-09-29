@@ -51,9 +51,25 @@ export interface ServiceInfo {
   updateStatus?: string;
 }
 
+/** Swarm cluster node state carried by "swarmnode" graph nodes. */
+export interface SwarmNodeInfo {
+  id: string;
+  role: 'manager' | 'worker';
+  /** True for the raft leader among the managers. */
+  leader?: boolean;
+  availability: 'active' | 'pause' | 'drain';
+  /** Docker node state: "ready", "down", "unknown", "disconnected". */
+  state: string;
+  addr?: string;
+  engineVersion?: string;
+  /** CPU capacity in nano-CPUs (1e9 = one core). */
+  nanoCpus?: number;
+  memoryBytes?: number;
+}
+
 export interface DGNode {
   id: string;
-  type: 'container' | 'service' | 'network' | 'volume';
+  type: 'container' | 'service' | 'network' | 'volume' | 'swarmnode';
   name: string;
   image?: string;
   status?: string;
@@ -69,6 +85,7 @@ export interface DGNode {
   /** Compose project or swarm stack namespace the node belongs to. */
   stack?: string;
   service?: ServiceInfo;
+  swarmNode?: SwarmNodeInfo;
 }
 
 export interface DGEdge {
@@ -123,6 +140,34 @@ export interface VolumeNodeData {
 export interface NetworkGroupData {
   dgNode: DGNode;
   onInfoClick?: (networkId: string) => void;
+}
+
+/** A swarm node box in the per-node graph view. */
+export interface SwarmNodeGroupData {
+  /** The swarmnode graph node, or a synthetic one for the Unassigned group. */
+  dgNode: DGNode;
+  /** True for the group of tasks not yet placed on a node. */
+  unassigned?: boolean;
+  /** Number of tasks (and local containers) placed in the box. */
+  taskCount: number;
+  /** Aggregate stats for the node (`node:{hostname}`), when an agent reports them. */
+  stats?: import('./types/stats').ContainerStatsData;
+  onInfoClick?: (nodeId: string) => void;
+}
+
+/** A single swarm task inside a node box of the per-node graph view. */
+export interface TaskNodeData {
+  /** Synthetic node carrying the task label (`{service}.{slot}`) for layout sizing. */
+  dgNode: DGNode;
+  task: TaskInfo;
+  /** Graph id of the owning service (`service:{name}`). */
+  serviceId: string;
+  serviceName: string;
+  stack?: string;
+  nodeWidth?: number;
+  stats?: import('./types/stats').ContainerStatsData;
+  /** Opens the detail panel for the given graph node (the owning service). */
+  onInfoClick?: (nodeId: string) => void;
 }
 
 /** A container using a named volume, with its mount path. */

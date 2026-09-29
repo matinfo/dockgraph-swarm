@@ -170,3 +170,35 @@ describe('taskContainerName', () => {
     expect(taskContainerName('shop_agent', { id: 't2', nodeId: 'n1' })).toBe('shop_agent.n1.t2');
   });
 });
+
+import { isNodeStatsKey, nodeStatsKey, seriesLabel, withoutNodeStats } from './stack';
+import type { ContainerStatsData } from '../types/stats';
+
+describe('swarm node helpers', () => {
+  it('recognises node:{hostname} stats keys', () => {
+    expect(nodeStatsKey('mgr')).toBe('node:mgr');
+    expect(isNodeStatsKey('node:mgr')).toBe(true);
+    expect(isNodeStatsKey('shop_web')).toBe(false);
+    expect(seriesLabel('node:mgr')).toBe('mgr');
+    expect(seriesLabel('shop_web')).toBe('shop_web');
+  });
+
+  it('drops node aggregates from a stats map', () => {
+    const s = {} as ContainerStatsData;
+    const m = new Map([['web', s], ['node:mgr', s]]);
+    expect([...withoutNodeStats(m).keys()]).toEqual(['web']);
+    const pure = new Map([['web', s]]);
+    expect(withoutNodeStats(pure)).toBe(pure);
+  });
+
+  it('keeps swarm nodes when filtering by stack and does not count them as workloads', () => {
+    const nodes: DGNode[] = [
+      { id: 'swarmnode:mgr', type: 'swarmnode', name: 'mgr', status: 'ready' },
+      { id: 'service:shop_web', type: 'service', name: 'shop_web', stack: 'shop', status: 'running' },
+      { id: 'service:blog_api', type: 'service', name: 'blog_api', stack: 'blog', status: 'running' },
+    ];
+    expect(filterGraphByStack(nodes, [], 'shop').nodes.map((n) => n.id)).toEqual(['swarmnode:mgr', 'service:shop_web']);
+    expect(filterGraphByStack(nodes, [], '_standalone').nodes.map((n) => n.id)).toEqual(['swarmnode:mgr']);
+    expect(listStacks(nodes).map((s) => s.name)).toEqual(['blog', 'shop']);
+  });
+});

@@ -15,6 +15,7 @@ export type DetailVariant =
   | { kind: 'volume'; volumeName: string }
   | { kind: 'network'; networkName: string }
   | { kind: 'group' }
+  | { kind: 'swarmnode'; node: DGNode }
   | { kind: 'ghost-container'; node: DGNode }
   | { kind: 'ghost-service'; node: DGNode }
   | { kind: 'ghost-volume'; node: DGNode }
@@ -70,6 +71,7 @@ export function useDetailPanel(dgNodes: DGNode[], dgEdges: DGEdge[]) {
   const isNetworkDetail = detailNodeId?.startsWith('network:') ?? false;
   const isGroupDetail = detailNodeId?.startsWith('group:') ?? false;
   const isServiceDetail = detailNodeId?.startsWith('service:') ?? false;
+  const isSwarmNodeDetail = detailNodeId?.startsWith('swarmnode:') ?? false;
   const detailDgNode = detailNodeId
     ? dgNodes.find((n) => n.id === detailNodeId)
     : null;
@@ -79,6 +81,8 @@ export function useDetailPanel(dgNodes: DGNode[], dgEdges: DGEdge[]) {
   const variant: DetailVariant = useMemo(() => {
     if (!detailNodeId) return { kind: 'none' };
     if (isGroupDetail) return { kind: 'group' };
+    // Swarm nodes need no fetch: the graph node carries everything shown.
+    if (isSwarmNodeDetail) return detailDgNode ? { kind: 'swarmnode', node: detailDgNode } : { kind: 'none' };
     if (isGhostResource && detailDgNode) {
       if (isVolumeDetail) return { kind: 'ghost-volume', node: detailDgNode };
       if (isNetworkDetail) return { kind: 'ghost-network', node: detailDgNode };
@@ -89,7 +93,7 @@ export function useDetailPanel(dgNodes: DGNode[], dgEdges: DGEdge[]) {
     if (isVolumeDetail) return { kind: 'volume', volumeName: detailNodeId.replace('volume:', '') };
     if (isServiceDetail) return { kind: 'service', serviceName: detailNodeId.replace('service:', '') };
     return { kind: 'container', containerName: detailNodeId.replace('container:', '') };
-  }, [detailNodeId, isGroupDetail, isGhostResource, isVolumeDetail, isNetworkDetail, isServiceDetail, detailDgNode]);
+  }, [detailNodeId, isGroupDetail, isSwarmNodeDetail, isGhostResource, isVolumeDetail, isNetworkDetail, isServiceDetail, detailDgNode]);
 
   // Containers belonging to the selected network/group.
   const groupContainers = useMemo(() => {

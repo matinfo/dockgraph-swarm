@@ -5,6 +5,7 @@ import {
   HIGHLIGHT_EDGE_STROKE_WIDTH,
   DEFAULT_EDGE_STROKE_WIDTH,
 } from '../utils/constants';
+import { isGroupType } from '../layout/elkGraph';
 
 export interface SelectionState {
   type: 'node' | 'edge';
@@ -33,7 +34,7 @@ export function resolveConnectedElements(
   const selectedNode = selection.type === 'node'
     ? nodes.find((n) => n.id === selection.id)
     : null;
-  const isGroupSelection = selectedNode?.type === 'networkGroup';
+  const isGroupSelection = isGroupType(selectedNode?.type);
 
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
 
@@ -78,7 +79,7 @@ export function resolveConnectedElements(
       // When an edge endpoint is a network group, include all its children
       // so clicking a node↔network edge lights up the entire network.
       for (const endpointId of [edge.source, edge.target]) {
-        if (nodeById.get(endpointId)?.type === 'networkGroup') {
+        if (isGroupType(nodeById.get(endpointId)?.type)) {
           for (const n of nodes) {
             if (n.parentId === endpointId) connectedNodeIds.add(n.id);
           }
@@ -107,7 +108,7 @@ export function styleNodesForSelection(
   highlightedGroupIds: Set<string>,
 ): RFNode[] {
   return nodes.map((n) => {
-    const highlighted = n.type === 'networkGroup'
+    const highlighted = isGroupType(n.type)
       ? highlightedGroupIds.has(n.id) || connectedNodeIds.has(n.id)
       : connectedNodeIds.has(n.id);
     return { ...n, style: { ...n.style, opacity: highlighted ? 1 : FADE_OPACITY } };

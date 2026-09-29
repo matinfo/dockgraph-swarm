@@ -158,3 +158,47 @@ describe('computeLayout', () => {
     expect(new Set(sortedYs).size).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('computeLayout — swarm node boxes', () => {
+  function task(id: string, parentId: string): RFNode {
+    return {
+      id, type: 'taskNode', position: { x: 0, y: 0 }, parentId,
+      data: { dgNode: { id, name: id, type: 'container' } },
+    } as unknown as RFNode;
+  }
+  function box(id: string): RFNode {
+    return {
+      id, type: 'nodeGroup', position: { x: 0, y: 0 }, style: {},
+      data: { dgNode: { id, name: id, type: 'swarmnode' }, taskCount: 0 },
+    } as unknown as RFNode;
+  }
+
+  it('packs tasks inside their box below the header and sizes the box', async () => {
+    const tasks = Array.from({ length: 6 }, (_, i) => task(`t${i}`, 'swarmnode:a'));
+    const result = await computeLayout([box('swarmnode:a'), box('swarmnode:b'), ...tasks], []);
+
+    const a = result.nodes.find((n) => n.id === 'swarmnode:a')!;
+    const b = result.nodes.find((n) => n.id === 'swarmnode:b')!;
+    const aw = Number(a.style?.width);
+    const ah = Number(a.style?.height);
+    expect(aw).toBeGreaterThanOrEqual(280);
+    expect(Number(b.style?.width)).toBeGreaterThanOrEqual(280);
+
+    for (const t of result.nodes.filter((n) => n.type === 'taskNode')) {
+      expect(t.position.y).toBeGreaterThanOrEqual(60);
+      expect(t.position.x).toBeGreaterThanOrEqual(0);
+      expect(t.position.x).toBeLessThan(aw);
+      expect(t.position.y).toBeLessThan(ah);
+      // Task cards get the shared node width like other cards.
+      expect((t.data as { nodeWidth?: number }).nodeWidth).toBeGreaterThan(0);
+    }
+    // Several tasks wrap into more than one row instead of one long line.
+    const ys = new Set(result.nodes.filter((n) => n.type === 'taskNode').map((n) => n.position.y));
+    expect(ys.size).toBeGreaterThan(1);
+    // The first task sits top-left (input order is kept).
+    const t0 = result.nodes.find((n) => n.id === 't0')!;
+    for (const t of result.nodes.filter((n) => n.type === 'taskNode')) {
+      expect(t.position.y).toBeGreaterThanOrEqual(t0.position.y);
+    }
+  });
+});

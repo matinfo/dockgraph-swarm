@@ -3,6 +3,7 @@ import { useTheme } from "../../theme";
 import { DashboardCard } from "./DashboardCard";
 import { STATUS_COLORS } from "./palette";
 import { evaluateAlerts, type Alert } from "../../utils/alerts";
+import { withoutNodeStats } from "../../utils/stack";
 import type { DGNode } from "../../types";
 import type { ContainerStatsData } from "../../types/stats";
 
@@ -21,7 +22,8 @@ const SEVERITY_STYLES: Record<Alert["severity"], { color: string; bg: string; la
 
 export const AlertsCard = memo(function AlertsCard({ nodes, statsMap, onInspect }: Props) {
   const { theme } = useTheme();
-  const alerts = useMemo(() => evaluateAlerts(nodes, statsMap), [nodes, statsMap]);
+  // Per-swarm-node aggregates (`node:{hostname}`) are not workloads to alert on.
+  const alerts = useMemo(() => evaluateAlerts(nodes, withoutNodeStats(statsMap)), [nodes, statsMap]);
   const [hovered, setHovered] = useState<number | null>(null);
 
   const badge = alerts.length > 0 ? (

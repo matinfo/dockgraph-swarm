@@ -1,10 +1,32 @@
 import type { ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk.bundled';
 import type { Node as RFNode, Edge as RFEdge } from '@xyflow/react';
-import { CONTAINER_NODE_HEIGHT, VOLUME_NODE_HEIGHT } from '../utils/constants';
+import { CONTAINER_NODE_HEIGHT, TASK_NODE_HEIGHT, VOLUME_NODE_HEIGHT } from '../utils/constants';
+
+/** React Flow node types rendered as containers of other nodes. */
+const GROUP_TYPES = new Set(['networkGroup', 'nodeGroup']);
+
+/** True for group node types (network groups and swarm node boxes). */
+export function isGroupType(type: string | undefined): boolean {
+  return type !== undefined && GROUP_TYPES.has(type);
+}
 
 /** Padding for network group nodes. */
 const GROUP_OPTIONS = {
   'elk.padding': '[top=35,left=15,bottom=12,right=15]',
+};
+
+/**
+ * Swarm node boxes: tall header (hostname, badges, resource bars) and no
+ * edges inside, so the tasks are packed in input order (stack, service,
+ * slot) into a compact grid instead of one layered row.
+ */
+const NODE_GROUP_OPTIONS = {
+  'elk.algorithm': 'rectpacking',
+  'elk.padding': '[top=66,left=12,bottom=12,right=12]',
+  'elk.spacing.nodeNode': '10',
+  'elk.aspectRatio': '1.6',
+  'elk.nodeSize.constraints': 'MINIMUM_SIZE',
+  'elk.nodeSize.minimum': '(280, 110)',
 };
 
 /** ELK layout options for the inner component graphs. */
@@ -35,9 +57,9 @@ export interface ClassifiedNodes {
 
 /** Splits React Flow nodes by role: groups, children (parented), and free-standing. */
 export function classifyNodes(nodes: RFNode[]): ClassifiedNodes {
-  const groups = nodes.filter((n) => n.type === 'networkGroup');
+  const groups = nodes.filter((n) => isGroupType(n.type));
   const children = nodes.filter((n) => n.parentId);
-  const freeNodes = nodes.filter((n) => n.type !== 'networkGroup' && !n.parentId);
+  const freeNodes = nodes.filter((n) => !isGroupType(n.type) && !n.parentId);
 
   const childToParent = new Map<string, string>();
   for (const c of children) {
@@ -47,9 +69,11 @@ export function classifyNodes(nodes: RFNode[]): ClassifiedNodes {
   return { groups, children, freeNodes, childToParent };
 }
 
-/** Service nodes share the container footprint, so only volumes differ. */
+/** Service nodes share the container footprint; volumes and tasks are shorter. */
 function nodeHeight(rfNode: RFNode): number {
-  return rfNode.type === 'volumeNode' ? VOLUME_NODE_HEIGHT : CONTAINER_NODE_HEIGHT;
+  if (rfNode.type === 'volumeNode') return VOLUME_NODE_HEIGHT;
+  if (rfNode.type === 'taskNode') return TASK_NODE_HEIGHT;
+  return CONTAINER_NODE_HEIGHT;
 }
 
 /**
@@ -74,11 +98,11 @@ export function buildElkChildren(
       const rfNode = nodeMap.get(id);
       if (!rfNode) continue;
 
-      if (rfNode.type === 'networkGroup') {
+      if (isGroupType(rfNode.type)) {
         const groupChildren = children.filter((n) => n.parentId === id);
         elkChildren.push({
           id,
-          layoutOptions: GROUP_OPTIONS,
+          layoutOptions: rfNode.type === 'nodeGroup' ? NODE_GROUP_OPTIONS : GROUP_OPTIONS,
           children: groupChildren.length > 0
             ? groupChildren.map((child) => ({
                 id: child.id,

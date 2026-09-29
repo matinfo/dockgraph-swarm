@@ -1,4 +1,5 @@
 import type { DGNode, DGEdge, TaskInfo } from '../types';
+import type { ContainerStatsData } from '../types/stats';
 
 /** Label Docker Compose sets on every resource of a project. */
 export const COMPOSE_PROJECT_LABEL = 'com.docker.compose.project';
@@ -26,9 +27,47 @@ export function projectOf(node: DGNode): string | undefined {
   );
 }
 
-/** True for nodes that run code (containers and swarm services). */
+/**
+ * True for nodes that run code (containers and swarm services). Swarm nodes
+ * (cluster machines) are infrastructure, not workloads.
+ */
 export function isWorkload(node: DGNode): boolean {
   return node.type === 'container' || node.type === 'service';
+}
+
+/** Prefix of the per-swarm-node aggregate keys in the live stats map and history. */
+export const NODE_STATS_PREFIX = 'node:';
+
+/** Stats key of a swarm node's aggregate: `node:{hostname}`. */
+export function nodeStatsKey(hostname: string): string {
+  return `${NODE_STATS_PREFIX}${hostname}`;
+}
+
+/**
+ * True for per-swarm-node aggregate stats keys (`node:{hostname}`). Docker
+ * names can't contain a colon, so these never collide with a workload.
+ */
+export function isNodeStatsKey(key: string): boolean {
+  return key.startsWith(NODE_STATS_PREFIX);
+}
+
+/** Chart/legend label of a stats series: node aggregates show the bare hostname. */
+export function seriesLabel(key: string): string {
+  return isNodeStatsKey(key) ? key.slice(NODE_STATS_PREFIX.length) : key;
+}
+
+/** Returns the stats map without the per-node aggregates (workload entries only). */
+export function withoutNodeStats(stats: Map<string, ContainerStatsData>): Map<string, ContainerStatsData> {
+  let hasNode = false;
+  for (const key of stats.keys()) {
+    if (isNodeStatsKey(key)) { hasNode = true; break; }
+  }
+  if (!hasNode) return stats;
+  const out = new Map<string, ContainerStatsData>();
+  for (const [key, value] of stats) {
+    if (!isNodeStatsKey(key)) out.set(key, value);
+  }
+  return out;
 }
 
 export interface StackSummary {
@@ -69,7 +108,9 @@ export function inStack(node: DGNode, stack: string): boolean {
 /**
  * Narrows the graph to one stack. Keeps the stack's own nodes, plus any
  * network or volume a kept workload references (e.g. an external network),
- * plus the edges whose ends both survive. A null stack returns the input.
+ * plus the edges whose ends both survive. Swarm nodes are always kept, so
+ * the per-node view still shows the machines a stack has no task on. A null
+ * stack returns the input.
  *
  * For the standalone scope only workloads without a project are kept as
  * "own" nodes; networks and volumes come in only when referenced, so
@@ -84,7 +125,9 @@ export function filterGraphByStack(
 
   const kept = new Set<string>();
   for (const n of nodes) {
-    if (isWorkload(n) ? inStack(n, stack) : stack !== STANDALONE_STACK && inStack(n, stack)) {
+    if (n.type === 'swarmnode') {
+      kept.add(n.id);
+    } else if (isWorkload(n) ? inStack(n, stack) : stack !== STANDALONE_STACK && inStack(n, stack)) {
       kept.add(n.id);
     }
   }

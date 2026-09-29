@@ -46,6 +46,31 @@ export function networkColor(name: string, stack?: string): string {
   return color;
 }
 
+/** Neutral colour for workloads that belong to no stack. */
+export const NO_STACK_COLOR = '#64748b';
+
+/**
+ * Deterministic identity colour for a stack/project, hashed like network
+ * colours. Workloads without a stack get a neutral slate.
+ */
+export function stackColor(stack: string | undefined): string {
+  if (!stack) return NO_STACK_COLOR;
+  return PALETTE[hashString(stack) % PALETTE.length];
+}
+
+/** Colours for swarm node states ("ready", "down", ...). */
+export const SWARM_NODE_STATE_COLORS: Record<string, string> = {
+  ready: '#22c55e',
+  down: '#ef4444',
+  disconnected: '#ef4444',
+  unknown: '#f59e0b',
+};
+
+/** Colour of a swarm node state dot; unknown states read amber. */
+export function swarmNodeStateColor(state: string | undefined): string {
+  return SWARM_NODE_STATE_COLORS[state ?? 'unknown'] ?? SWARM_NODE_STATE_COLORS.unknown;
+}
+
 export const STATUS_COLORS: Record<string, string> = {
   running: '#22c55e',
   unhealthy: '#f59e0b',

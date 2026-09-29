@@ -7,6 +7,8 @@ import {
 } from '@xyflow/react';
 import { computeLayout } from '../layout/elk';
 import { toReactFlowNodes, toReactFlowEdges } from '../utils/graphTransform';
+import { toNodeGroupedFlowNodes, nodeGroupedTopologyKey } from '../utils/nodeTransform';
+import type { GroupBy } from './useGroupBy';
 import type { DGNode, DGEdge } from '../types';
 
 interface GraphLayoutResult {
@@ -25,10 +27,33 @@ interface GraphLayoutResult {
  * Status changes (running -> exited) don't alter the fingerprint, so they
  * skip the expensive ELK layout and only update node/edge data in place.
  */
-function topologyKey(dgNodes: DGNode[], dgEdges: DGEdge[]): string {
+function topologyKey(dgNodes: DGNode[], dgEdges: DGEdge[], groupBy: GroupBy, localNodeId: string | null): string {
+  if (groupBy === 'node') {
+    // Tasks live inside their service node, so the per-node view keys on the
+    // cards it will draw and the box holding each.
+    return 'node|' + nodeGroupedTopologyKey(dgNodes, localNodeId);
+  }
   const nk = dgNodes.map((n) => n.id).sort().join(',');
   const ek = dgEdges.map((e) => e.id).sort().join(',');
-  return nk + '|' + ek;
+  return 'network|' + nk + '|' + ek;
+}
+
+/** React Flow nodes and edges for the chosen grouping. Node mode draws no edges. */
+function buildFlow(
+  dgNodes: DGNode[],
+  dgEdges: DGEdge[],
+  edgeStroke: string,
+  accentStroke: string,
+  groupBy: GroupBy,
+  localNodeId: string | null,
+): { rfNodes: RFNode[]; rfEdges: RFEdge[] } {
+  if (groupBy === 'node') {
+    return { rfNodes: toNodeGroupedFlowNodes(dgNodes, localNodeId), rfEdges: [] };
+  }
+  return {
+    rfNodes: toReactFlowNodes(dgNodes, dgEdges),
+    rfEdges: toReactFlowEdges(dgEdges, dgNodes, edgeStroke, accentStroke),
+  };
 }
 
 /**
@@ -37,17 +62,26 @@ function topologyKey(dgNodes: DGNode[], dgEdges: DGEdge[]): string {
  * When the topology changes (nodes/edges added or removed), runs a full
  * async ELK layout. When only data changes (status, ports, etc.), patches
  * the existing positioned nodes/edges without relayout.
+ *
+ * `groupBy` picks the network view (default) or the per-swarm-node view;
+ * `localNodeId` is the swarm node id of the local daemon, which hosts the
+ * standalone containers in the per-node view.
  */
 export function useGraphLayout(
   dgNodes: DGNode[],
   dgEdges: DGEdge[],
   edgeStroke: string,
   accentStroke: string,
+  groupBy: GroupBy = 'network',
+  localNodeId: string | null = null,
 ): GraphLayoutResult {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
 
-  const topoKey = useMemo(() => topologyKey(dgNodes, dgEdges), [dgNodes, dgEdges]);
+  const topoKey = useMemo(
+    () => topologyKey(dgNodes, dgEdges, groupBy, localNodeId),
+    [dgNodes, dgEdges, groupBy, localNodeId],
+  );
   // settledTopoKey: fingerprint of the topology currently positioned on screen.
   // errorTopoKey:   fingerprint of the topology whose most recent attempt failed.
   // Tracking these as state lets layoutBusy/layoutError be derived during render
@@ -62,8 +96,7 @@ export function useGraphLayout(
     if (dgNodes.length === 0) return;
     let cancelled = false;
 
-    const rfNodes = toReactFlowNodes(dgNodes, dgEdges);
-    const rfEdges = toReactFlowEdges(dgEdges, dgNodes, edgeStroke, accentStroke);
+    const { rfNodes, rfEdges } = buildFlow(dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId);
 
     computeLayout(rfNodes, rfEdges)
       .then((layout) => {
@@ -80,7 +113,8 @@ export function useGraphLayout(
 
     return () => { cancelled = true; };
   // edgeStroke is excluded — color-only changes are handled by the
-  // lightweight update below without re-running ELK.
+  // lightweight update below without re-running ELK. groupBy and localNodeId
+  // are folded into topoKey.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topoKey, setNodes, setEdges]);
 
@@ -90,20 +124,19 @@ export function useGraphLayout(
   useEffect(() => {
     if (dgNodes.length === 0 || topoKey !== settledTopoKey) return;
 
-    const rfEdges = toReactFlowEdges(dgEdges, dgNodes, edgeStroke, accentStroke);
+    const { rfNodes, rfEdges } = buildFlow(dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId);
     const rfEdgeMap = new Map(rfEdges.map((e) => [e.id, e]));
     setEdges((prev) => prev.map((e) => {
       const updated = rfEdgeMap.get(e.id);
       return updated ? { ...e, data: { ...e.data, ...updated.data }, style: updated.style } : e;
     }));
 
-    const rfNodes = toReactFlowNodes(dgNodes, dgEdges);
     const rfNodeMap = new Map(rfNodes.map((n) => [n.id, n]));
     setNodes((prev) => prev.map((n) => {
       const updated = rfNodeMap.get(n.id);
       return updated ? { ...n, data: { ...n.data, ...updated.data } } : n;
     }));
-  }, [dgNodes, dgEdges, edgeStroke, accentStroke, topoKey, settledTopoKey, setNodes, setEdges]);
+  }, [dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId, topoKey, settledTopoKey, setNodes, setEdges]);
 
   return { nodes, edges, setNodes, setEdges, onNodesChange, onEdgesChange, layoutBusy, layoutError };
 }

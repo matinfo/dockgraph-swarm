@@ -8,6 +8,7 @@ import {
   styleNodesForSelection,
   styleEdgesForSelection,
 } from '../utils/selectionGraph';
+import { isGroupType } from '../layout/elkGraph';
 
 interface HighlightResult {
   styledNodes: RFNode[];
@@ -19,6 +20,19 @@ interface HighlightResult {
   onPaneClick: () => void;
   selectNode: (id: string) => void;
   selectEdge: (id: string) => void;
+}
+
+/**
+ * True when a node stays lit under an active search: groups always do, task
+ * cards follow their owning service.
+ */
+function matchesSearch(n: RFNode, matchingNodeIds: Set<string>): boolean {
+  if (isGroupType(n.type) || matchingNodeIds.has(n.id)) return true;
+  if (n.type === 'taskNode') {
+    const serviceId = (n.data as { serviceId?: string }).serviceId;
+    return serviceId !== undefined && matchingNodeIds.has(serviceId);
+  }
+  return false;
 }
 
 /**
@@ -36,7 +50,7 @@ export function useSelectionHighlight(nodes: RFNode[], edges: RFEdge[], useCanva
       if (matchingNodeIds) {
         const searchStyled = nodes.map((n) => ({
           ...n,
-          style: { ...n.style, opacity: matchingNodeIds.has(n.id) || n.type === 'networkGroup' ? 1 : FADE_OPACITY },
+          style: { ...n.style, opacity: matchesSearch(n, matchingNodeIds) ? 1 : FADE_OPACITY },
         }));
         return {
           styledNodes: searchStyled,

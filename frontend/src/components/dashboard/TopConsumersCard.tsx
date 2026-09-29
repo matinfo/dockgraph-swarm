@@ -4,6 +4,7 @@ import { DashboardCard } from "./DashboardCard";
 import { ProgressBar } from "./ProgressBar";
 import { METRIC_COLORS } from "./palette";
 import { formatBytes, formatPercent } from "../../utils/format";
+import { isNodeStatsKey } from "../../utils/stack";
 import type { ContainerStatsData } from "../../types/stats";
 
 interface Props {
@@ -28,7 +29,8 @@ export const TopConsumersCard = memo(function TopConsumersCard({ statsMap, onIns
   const [hovered, setHovered] = useState<string | null>(null);
 
   const rows = useMemo(() => {
-    const entries: Row[] = Array.from(statsMap.entries()).map(([name, s]) => ({
+    // Per-swarm-node aggregates (`node:{hostname}`) are not consumers.
+    const entries: Row[] = Array.from(statsMap.entries()).filter(([name]) => !isNodeStatsKey(name)).map(([name, s]) => ({
       name,
       cpu: s.cpuPercent,
       mem: s.memUsage,

@@ -72,6 +72,16 @@ describe("TopConsumersCard interactions", () => {
     fireEvent.click(screen.getByText("web"));
     expect(onInspect).toHaveBeenCalledWith("container:web");
   });
+
+  it("does not list per-swarm-node aggregates as consumers", () => {
+    const statsMap = new Map<string, ContainerStatsData>([
+      ["web", makeStats()],
+      ["node:mgr", { ...makeStats(), cpuPercent: 999 }],
+    ]);
+    render(<TopConsumersCard statsMap={statsMap} onInspect={vi.fn()} />);
+    expect(screen.getByText("web")).toBeDefined();
+    expect(screen.queryByText("node:mgr")).toBeNull();
+  });
 });
 
 describe("EventTimelineCard interactions", () => {
