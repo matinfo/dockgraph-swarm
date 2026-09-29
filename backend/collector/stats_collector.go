@@ -18,6 +18,10 @@ type StatsCollector struct {
 	updates    chan StatsSnapshot
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
+
+	// localNodeID and localHostname stamp local samples in swarm mode.
+	localNodeID   string
+	localHostname string
 }
 
 // RemoteSampler supplies container samples from other nodes (per-node agents
@@ -30,6 +34,16 @@ type RemoteSampler interface {
 // snapshot alongside local samples. Must be called before Start.
 func (s *StatsCollector) SetRemote(r RemoteSampler) {
 	s.remote = r
+}
+
+// SetLocalNode records the swarm node this collector samples, so local
+// samples are attributed to it (ContainerSample.NodeID/NodeHostname) and
+// feed its "node:{hostname}" aggregate. hostname must match the swarm node's
+// Description.Hostname, the name its graph node is keyed by. Must be called
+// before Start.
+func (s *StatsCollector) SetLocalNode(id, hostname string) {
+	s.localNodeID = id
+	s.localHostname = hostname
 }
 
 // NewStatsCollector creates a collector that polls container stats at the given interval.
@@ -95,14 +109,24 @@ func (s *StatsCollector) pollLoop(ctx context.Context) {
 
 // poll samples local containers and, concurrently, the remote sampler, then
 // merges both (local wins on duplicate container IDs) into one snapshot.
+// Local samples are stamped with the local node when one is set.
 func (s *StatsCollector) poll(ctx context.Context) StatsSnapshot {
-	if s.remote == nil {
-		return pollAllStats(ctx, s.client, s.maxWorkers)
+	var remoteCh chan []ContainerSample
+	if s.remote != nil {
+		remoteCh = make(chan []ContainerSample, 1)
+		go func() {
+			remoteCh <- s.remote.Samples(ctx)
+		}()
 	}
-	remoteCh := make(chan []ContainerSample, 1)
-	go func() {
-		remoteCh <- s.remote.Samples(ctx)
-	}()
 	local := PollSamples(ctx, s.client, s.maxWorkers)
+	if s.localHostname != "" {
+		for i := range local {
+			local[i].NodeID = s.localNodeID
+			local[i].NodeHostname = s.localHostname
+		}
+	}
+	if remoteCh == nil {
+		return BuildStatsSnapshot(local)
+	}
 	return BuildStatsSnapshot(mergeSamples(local, <-remoteCh))
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"hash/fnv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -167,8 +168,84 @@ func buildSwarmSnapshot(res swarmResources) GraphSnapshot {
 		}
 	}
 
+	snap.Nodes = append(snap.Nodes, buildSwarmNodeNodes(res.nodes)...)
+
 	sortSnapshot(&snap)
 	return snap
+}
+
+// buildSwarmNodeNodes creates one "swarmnode" graph node per cluster node,
+// keyed by hostname (the name tasks report via TaskInfo.NodeHostname and the
+// key of per-node stats aggregates). A node that left and rejoined keeps a
+// stale entry with the same hostname; when hostnames collide the ready node
+// wins, then the most recently updated one, so each hostname maps to a single
+// graph node. A node without a hostname falls back to its ID. DockGraph's own
+// nodes are infrastructure and never self-excluded.
+func buildSwarmNodeNodes(nodes []swarm.Node) []Node {
+	chosen := make(map[string]swarm.Node, len(nodes))
+	for _, n := range nodes {
+		name := swarmNodeName(n)
+		if prev, ok := chosen[name]; ok && !preferSwarmNode(n, prev) {
+			continue
+		}
+		chosen[name] = n
+	}
+	out := make([]Node, 0, len(chosen))
+	for name, n := range chosen {
+		out = append(out, buildSwarmNodeNode(name, n))
+	}
+	return out
+}
+
+// swarmNodeName is the hostname a swarm node is displayed and keyed under.
+func swarmNodeName(n swarm.Node) string {
+	if n.Description.Hostname != "" {
+		return n.Description.Hostname
+	}
+	return n.ID
+}
+
+// preferSwarmNode reports whether a should replace b for the same hostname.
+func preferSwarmNode(a, b swarm.Node) bool {
+	aReady := a.Status.State == swarm.NodeStateReady
+	bReady := b.Status.State == swarm.NodeStateReady
+	if aReady != bReady {
+		return aReady
+	}
+	if !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return a.UpdatedAt.After(b.UpdatedAt)
+	}
+	return a.ID < b.ID
+}
+
+// buildSwarmNodeNode converts a swarm node into its graph node.
+func buildSwarmNodeNode(name string, n swarm.Node) Node {
+	state := string(n.Status.State)
+	if state == "" {
+		state = string(swarm.NodeStateUnknown)
+	}
+	info := &SwarmNodeInfo{
+		ID:            n.ID,
+		Role:          string(n.Spec.Role),
+		Leader:        n.ManagerStatus != nil && n.ManagerStatus.Leader,
+		Availability:  string(n.Spec.Availability),
+		State:         state,
+		Addr:          n.Status.Addr,
+		EngineVersion: n.Description.Engine.EngineVersion,
+		NanoCPUs:      n.Description.Resources.NanoCPUs,
+		MemoryBytes:   n.Description.Resources.MemoryBytes,
+	}
+	node := Node{
+		ID:        "swarmnode:" + name,
+		Type:      nodeTypeSwarmNode,
+		Name:      name,
+		Status:    state,
+		SwarmNode: info,
+	}
+	if !n.CreatedAt.IsZero() {
+		node.CreatedAt = n.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	return node
 }
 
 // serviceContext holds cluster-wide lookups shared by every service node.
@@ -457,13 +534,20 @@ func groupTasksByService(tasks []swarm.Task) map[string][]swarm.Task {
 	return m
 }
 
-// taskFingerprint hashes the identity, placement and state of every task.
-// Task transitions on remote nodes emit no events on the manager, so the
-// collector polls TaskList and re-snapshots only when this value changes.
-func taskFingerprint(tasks []swarm.Task) uint64 {
-	keys := make([]string, 0, len(tasks))
+// taskFingerprint hashes the identity, placement and state of every task,
+// plus the identity, state, availability and role of every cluster node.
+// Task transitions on remote nodes emit no events on the manager, and a node
+// going down is not reliably evented either, so the collector polls TaskList
+// and NodeList and re-snapshots only when this value changes.
+func taskFingerprint(tasks []swarm.Task, nodes []swarm.Node) uint64 {
+	keys := make([]string, 0, len(tasks)+len(nodes))
 	for _, t := range tasks {
-		keys = append(keys, t.ID+"|"+t.NodeID+"|"+string(t.Status.State)+"|"+string(t.DesiredState))
+		keys = append(keys, "t|"+t.ID+"|"+t.NodeID+"|"+string(t.Status.State)+"|"+string(t.DesiredState))
+	}
+	for _, n := range nodes {
+		leader := n.ManagerStatus != nil && n.ManagerStatus.Leader
+		keys = append(keys, "n|"+n.ID+"|"+n.Description.Hostname+"|"+string(n.Status.State)+"|"+
+			string(n.Spec.Availability)+"|"+string(n.Spec.Role)+"|"+strconv.FormatBool(leader))
 	}
 	sort.Strings(keys)
 	h := fnv.New64a()

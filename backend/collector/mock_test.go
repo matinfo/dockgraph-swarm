@@ -115,7 +115,16 @@ func (s *stubDockerClient) TaskList(_ context.Context, _ swarm.TaskListOptions) 
 }
 
 func (s *stubDockerClient) NodeList(_ context.Context, _ swarm.NodeListOptions) ([]swarm.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.nodes, s.nodeErr
+}
+
+// setNodes replaces the node list returned by NodeList (safe for concurrent use).
+func (s *stubDockerClient) setNodes(nodes []swarm.Node) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nodes = nodes
 }
 
 // setTasks replaces the task list returned by TaskList (safe for concurrent use).

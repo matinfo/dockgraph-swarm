@@ -4,7 +4,8 @@
 //
 // Node and edge IDs follow a namespaced format to prevent collisions:
 //
-//	Nodes: "container:{name}", "service:{name}", "network:{name}", "volume:{name}"
+//	Nodes: "container:{name}", "service:{name}", "network:{name}", "volume:{name}",
+//	       "swarmnode:{hostname}"
 //	Edges: "e:dep:{source}:{target}", "e:net:{source}:{target}", "e:vol:{source}:{target}"
 package collector
 
@@ -36,6 +37,7 @@ type PortMapping struct {
 //	"service"   — Image, Status, Ports, Labels, NetworkID, Service (swarm mode)
 //	"network"   — Driver, Subnet, Gateway
 //	"volume"    — Driver, Status
+//	"swarmnode" — Status (ready, down, unknown, disconnected), SwarmNode
 //
 // Stack is the generic project the node belongs to: the compose project or,
 // for swarm resources, the stack namespace. Empty for standalone resources.
@@ -56,6 +58,23 @@ type Node struct {
 	Compose   *ComposeConfig    `json:"compose,omitempty"`
 	Stack     string            `json:"stack,omitempty"`
 	Service   *ServiceInfo      `json:"service,omitempty"`
+	SwarmNode *SwarmNodeInfo    `json:"swarmNode,omitempty"`
+}
+
+// SwarmNodeInfo carries cluster-node details for "swarmnode" nodes. Role is
+// "manager" or "worker", Availability is "active", "pause" or "drain", and
+// State is the node's reported state (also mirrored in Node.Status). NanoCPUs
+// and MemoryBytes are the node's total capacity as reported by its engine.
+type SwarmNodeInfo struct {
+	ID            string `json:"id"`
+	Role          string `json:"role"`
+	Leader        bool   `json:"leader"`
+	Availability  string `json:"availability"`
+	State         string `json:"state"`
+	Addr          string `json:"addr,omitempty"`
+	EngineVersion string `json:"engineVersion,omitempty"`
+	NanoCPUs      int64  `json:"nanoCpus,omitempty"`
+	MemoryBytes   int64  `json:"memoryBytes,omitempty"`
 }
 
 // ServiceInfo carries swarm service state for "service" nodes. Mode is one of

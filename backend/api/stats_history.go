@@ -12,6 +12,9 @@ import (
 	"github.com/dockgraph/dockgraph/collector"
 )
 
+// scopeNodes selects the per-node aggregate series of the stats history.
+const scopeNodes = "nodes"
+
 var validRanges = map[string]time.Duration{
 	"5m":  5 * time.Minute,
 	"1h":  time.Hour,
@@ -26,6 +29,10 @@ var validRanges = map[string]time.Duration{
 // container that has since been removed can no longer be attributed. In swarm
 // mode (services non-nil) the stack's service aggregates, keyed by service
 // name, and its task containers on any node ({service}.*) are kept too.
+//
+// Per-node aggregates (collector.NodeStatsPrefix keys) are excluded by
+// default so workload charts are unchanged; ?scope=nodes returns only them.
+// Node history is not per-stack, so scope=nodes with ?stack= is rejected.
 func HandleStatsHistory(history *collector.StatsHistory, lister ContainerLister, services ServiceLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rangeStr := r.URL.Query().Get("range")
@@ -45,8 +52,25 @@ func HandleStatsHistory(history *collector.StatsHistory, lister ContainerLister,
 			return
 		}
 
+		scope := r.URL.Query().Get("scope")
+		if scope != "" && scope != scopeNodes {
+			jsonError(w, "invalid scope: use nodes", http.StatusBadRequest)
+			return
+		}
+		if scope == scopeNodes && stack != "" {
+			jsonError(w, "scope=nodes cannot be combined with stack", http.StatusBadRequest)
+			return
+		}
+
 		now := time.Now()
 		result := history.Query(now.Add(-dur), now)
+
+		wantNodes := scope == scopeNodes
+		for name := range result.Containers {
+			if collector.IsNodeSeries(name) != wantNodes {
+				delete(result.Containers, name)
+			}
+		}
 
 		if stack != "" {
 			members, err := stackContainerNames(r.Context(), lister, stack)

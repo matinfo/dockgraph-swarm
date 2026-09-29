@@ -92,3 +92,66 @@ func TestHandleStatsHistory_DefaultRange(t *testing.T) {
 		t.Errorf("range = %v, want default 1h", body["range"])
 	}
 }
+
+func nodeScopeHistory() *collector.StatsHistory {
+	h := collector.NewStatsHistory(24 * time.Hour)
+	h.Record(time.Now().Add(-time.Minute), collector.StatsSnapshot{Stats: map[string]collector.ContainerStats{
+		"web":         {CPUPercent: 1},
+		"shop_api":    {CPUPercent: 2},
+		"node:mgr":    {CPUPercent: 3},
+		"node:worker": {CPUPercent: 4},
+	}})
+	return h
+}
+
+func historyKeys(t *testing.T, w *httptest.ResponseRecorder) map[string]bool {
+	t.Helper()
+	var body struct {
+		Containers map[string]any `json:"containers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	keys := make(map[string]bool, len(body.Containers))
+	for k := range body.Containers {
+		keys[k] = true
+	}
+	return keys
+}
+
+func TestHandleStatsHistory_DefaultExcludesNodeSeries(t *testing.T) {
+	handler := HandleStatsHistory(nodeScopeHistory(), nil, nil)
+	w := httptest.NewRecorder()
+	handler(w, httptest.NewRequest(http.MethodGet, "/api/stats/history?range=5m", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	keys := historyKeys(t, w)
+	if len(keys) != 2 || !keys["web"] || !keys["shop_api"] {
+		t.Errorf("default keys = %v, want web and shop_api", keys)
+	}
+}
+
+func TestHandleStatsHistory_ScopeNodes(t *testing.T) {
+	handler := HandleStatsHistory(nodeScopeHistory(), nil, nil)
+	w := httptest.NewRecorder()
+	handler(w, httptest.NewRequest(http.MethodGet, "/api/stats/history?range=5m&scope=nodes", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	keys := historyKeys(t, w)
+	if len(keys) != 2 || !keys["node:mgr"] || !keys["node:worker"] {
+		t.Errorf("scope=nodes keys = %v, want node:mgr and node:worker", keys)
+	}
+}
+
+func TestHandleStatsHistory_ScopeErrors(t *testing.T) {
+	handler := HandleStatsHistory(nodeScopeHistory(), nil, nil)
+	for _, q := range []string{"scope=nodes&stack=shop", "scope=bogus", "scope=containers"} {
+		w := httptest.NewRecorder()
+		handler(w, httptest.NewRequest(http.MethodGet, "/api/stats/history?"+q, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", q, w.Code)
+		}
+	}
+}

@@ -102,7 +102,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	mode, swarmInfo := detectMode(ctx, cfg.Mode, dockerCli)
+	mode, swarmInfo, hostname := detectMode(ctx, cfg.Mode, dockerCli)
 	if mode == collector.ModeAgent {
 		runAgent(ctx, cfg, dockerCli)
 		return
@@ -154,6 +154,7 @@ func main() {
 	sc := collector.NewStatsCollector(dockerCli, cfg.StatsInterval, cfg.StatsWorkers)
 	var serverOpts []api.ServerOption
 	if swarmMode {
+		sc.SetLocalNode(swarmInfo.NodeID, hostname)
 		if cfg.AgentToken == "" {
 			log.Println("INFO  DG_AGENT_TOKEN not set: agents disabled, stats and container logs limited to this node")
 		} else {
@@ -333,20 +334,29 @@ func pipeStatsWithHistory(ctx context.Context, sc *collector.StatsCollector, hub
 // detectMode resolves DG_MODE against the daemon's swarm state, exiting on
 // an unusable combination (e.g. auto on a swarm worker). If the daemon can't
 // be queried, auto falls back to standalone.
-func detectMode(ctx context.Context, requested string, cli *client.Client) (string, swarm.Info) {
+//
+// It also returns the daemon's hostname (Info().Name). Swarm fills a node's
+// Description.Hostname from that same value, and per-node agents report it
+// too, so it matches the hostname swarm node graph nodes and per-node stats
+// aggregates are keyed by without an extra NodeInspect call.
+func detectMode(ctx context.Context, requested string, cli *client.Client) (string, swarm.Info, string) {
 	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var sw swarm.Info
+	var (
+		sw       swarm.Info
+		hostname string
+	)
 	if info, err := cli.Info(infoCtx); err != nil {
 		log.Printf("WARN  failed to query docker info for mode detection: %v", err)
 	} else {
 		sw = info.Swarm
+		hostname = info.Name
 	}
 	mode, err := resolveMode(requested, sw)
 	if err != nil {
 		log.Fatalf("mode detection: %v", err)
 	}
-	return mode, sw
+	return mode, sw, hostname
 }
 
 // pipeEvents subscribes to Docker events and records them in the event history

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -464,18 +465,45 @@ func TestTaskFingerprint(t *testing.T) {
 	a := task("t1", "s", "n1", 1, swarm.TaskStateRunning, swarm.TaskStateRunning)
 	b := task("t2", "s", "n2", 2, swarm.TaskStateRunning, swarm.TaskStateRunning)
 
-	if taskFingerprint([]swarm.Task{a, b}) != taskFingerprint([]swarm.Task{b, a}) {
+	if taskFingerprint([]swarm.Task{a, b}, nil) != taskFingerprint([]swarm.Task{b, a}, nil) {
 		t.Error("fingerprint must not depend on order")
 	}
 	moved := b
 	moved.NodeID = "n1"
-	if taskFingerprint([]swarm.Task{a, b}) == taskFingerprint([]swarm.Task{a, moved}) {
+	if taskFingerprint([]swarm.Task{a, b}, nil) == taskFingerprint([]swarm.Task{a, moved}, nil) {
 		t.Error("fingerprint must change when a task moves")
 	}
 	failed := b
 	failed.Status.State = swarm.TaskStateFailed
-	if taskFingerprint([]swarm.Task{a, b}) == taskFingerprint([]swarm.Task{a, failed}) {
+	if taskFingerprint([]swarm.Task{a, b}, nil) == taskFingerprint([]swarm.Task{a, failed}, nil) {
 		t.Error("fingerprint must change when a task state changes")
+	}
+}
+
+func TestTaskFingerprintNodes(t *testing.T) {
+	tasks := []swarm.Task{task("t1", "s", "n1", 1, swarm.TaskStateRunning, swarm.TaskStateRunning)}
+	n1, n2 := swarmNode("n1", "a"), swarmNode("n2", "b")
+	base := taskFingerprint(tasks, []swarm.Node{n1, n2})
+
+	if base != taskFingerprint(tasks, []swarm.Node{n2, n1}) {
+		t.Error("fingerprint must not depend on node order")
+	}
+
+	drained := n2
+	drained.Spec.Availability = swarm.NodeAvailabilityDrain
+	down := n2
+	down.Status.State = swarm.NodeStateDown
+	promoted := n2
+	promoted.Spec.Role = swarm.NodeRoleManager
+	leader := n2
+	leader.ManagerStatus = &swarm.ManagerStatus{Leader: true}
+	for name, changed := range map[string]swarm.Node{"drain": drained, "down": down, "role": promoted, "leader": leader} {
+		if base == taskFingerprint(tasks, []swarm.Node{n1, changed}) {
+			t.Errorf("fingerprint must change on node %s", name)
+		}
+	}
+	if base == taskFingerprint(tasks, []swarm.Node{n1}) {
+		t.Error("fingerprint must change when a node leaves")
 	}
 }
 
@@ -539,6 +567,119 @@ func TestDockerCollectorCheckTasksResnapshotsOnlyOnChange(t *testing.T) {
 	case <-dc.Updates():
 	default:
 		t.Fatal("expected re-snapshot after task change")
+	}
+
+	// A node is drained, tasks unchanged: re-snapshot.
+	nodes := append([]swarm.Node(nil), res.nodes...)
+	nodes[1].Spec.Availability = swarm.NodeAvailabilityDrain
+	cli.setNodes(nodes)
+	dc.checkTasks(ctx)
+	select {
+	case u := <-dc.Updates():
+		n := findNodeByID(u.Snapshot.Nodes, "swarmnode:worker-1")
+		if n == nil || n.SwarmNode == nil || n.SwarmNode.Availability != "drain" {
+			t.Fatalf("drained node not reflected: %+v", n)
+		}
+	default:
+		t.Fatal("expected re-snapshot after node drain")
+	}
+
+	// Node list fails: no re-snapshot.
+	cli.mu.Lock()
+	cli.nodeErr = context.DeadlineExceeded
+	cli.mu.Unlock()
+	dc.checkTasks(ctx)
+	select {
+	case <-dc.Updates():
+		t.Fatal("unexpected re-snapshot when node list fails")
+	default:
+	}
+}
+
+// --- swarm node graph nodes ---
+
+func TestBuildSwarmSnapshotSwarmNodes(t *testing.T) {
+	res := shopResources()
+
+	leader := swarmNode("n1", "manager-1")
+	leader.Spec.Role = swarm.NodeRoleManager
+	leader.ManagerStatus = &swarm.ManagerStatus{Leader: true, Reachability: swarm.ReachabilityReachable}
+	leader.Status.Addr = "10.0.0.1"
+	leader.Description.Engine.EngineVersion = "27.3.1"
+	leader.Description.Resources = swarm.Resources{NanoCPUs: 4e9, MemoryBytes: 8 << 30}
+
+	down := swarmNode("n2", "worker-1")
+	down.Spec.Role = swarm.NodeRoleWorker
+	down.Status.State = swarm.NodeStateDown
+
+	drained := swarmNode("n3", "worker-2")
+	drained.Spec.Role = swarm.NodeRoleWorker
+	drained.Spec.Availability = swarm.NodeAvailabilityDrain
+
+	noState := swarm.Node{ID: "n4"} // no hostname, no state
+	noState.Spec.Role = swarm.NodeRoleWorker
+
+	res.nodes = []swarm.Node{leader, down, drained, noState}
+	snap := buildSwarmSnapshot(res)
+
+	m := findNodeByID(snap.Nodes, "swarmnode:manager-1")
+	if m == nil {
+		t.Fatalf("missing leader node: %+v", snap.Nodes)
+	}
+	want := SwarmNodeInfo{
+		ID: "n1", Role: "manager", Leader: true, Availability: "active", State: "ready",
+		Addr: "10.0.0.1", EngineVersion: "27.3.1", NanoCPUs: 4e9, MemoryBytes: 8 << 30,
+	}
+	if m.Type != "swarmnode" || m.Name != "manager-1" || m.Status != "ready" || m.SwarmNode == nil || *m.SwarmNode != want {
+		t.Errorf("leader node = %+v / %+v", m, m.SwarmNode)
+	}
+
+	w := findNodeByID(snap.Nodes, "swarmnode:worker-1")
+	if w == nil || w.Status != "down" || w.SwarmNode.Role != "worker" || w.SwarmNode.Leader {
+		t.Errorf("down node = %+v", w)
+	}
+	d := findNodeByID(snap.Nodes, "swarmnode:worker-2")
+	if d == nil || d.Status != "ready" || d.SwarmNode.Availability != "drain" {
+		t.Errorf("drained node = %+v", d)
+	}
+	u := findNodeByID(snap.Nodes, "swarmnode:n4")
+	if u == nil || u.Status != "unknown" || u.SwarmNode.State != "unknown" {
+		t.Errorf("hostname-less node = %+v", u)
+	}
+}
+
+func TestBuildSwarmNodeNodesDuplicateHostname(t *testing.T) {
+	stale := swarmNode("old", "box")
+	stale.Status.State = swarm.NodeStateDown
+	stale.UpdatedAt = time.Unix(2000, 0)
+	fresh := swarmNode("new", "box")
+	fresh.UpdatedAt = time.Unix(1000, 0)
+
+	for _, order := range [][]swarm.Node{{stale, fresh}, {fresh, stale}} {
+		got := buildSwarmNodeNodes(order)
+		if len(got) != 1 || got[0].SwarmNode.ID != "new" {
+			t.Errorf("want only the ready node, got %+v", got)
+		}
+	}
+
+	older := swarmNode("a", "box")
+	older.UpdatedAt = time.Unix(1000, 0)
+	newer := swarmNode("b", "box")
+	newer.UpdatedAt = time.Unix(2000, 0)
+	got := buildSwarmNodeNodes([]swarm.Node{newer, older})
+	if len(got) != 1 || got[0].SwarmNode.ID != "b" {
+		t.Errorf("want most recently updated node, got %+v", got)
+	}
+}
+
+func TestSwarmNodeInfoJSON(t *testing.T) {
+	b, err := json.Marshal(SwarmNodeInfo{ID: "n1", Role: "worker", Availability: "active", State: "ready"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"id":"n1","role":"worker","leader":false,"availability":"active","state":"ready"}`
+	if string(b) != want {
+		t.Errorf("json = %s, want %s", b, want)
 	}
 }
 

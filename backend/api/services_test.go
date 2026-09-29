@@ -417,6 +417,7 @@ func TestHandleStatsHistoryStackFilterSwarm(t *testing.T) {
 		"shop_web.2.remote": {CPUPercent: 2}, // task on another node
 		"shop_webx":         {CPUPercent: 9}, // unrelated look-alike
 		"blog_app":          {CPUPercent: 1},
+		"node:shop_web":     {CPUPercent: 5}, // node aggregate, never stack-scoped
 	}})
 	services := &stubDockerAPI{services: []swarm.Service{
 		{ID: "s1", Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{Name: "shop_web", Labels: map[string]string{collector.StackNamespaceLabel: "shop"}}}},

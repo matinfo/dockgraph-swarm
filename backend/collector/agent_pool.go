@@ -261,7 +261,8 @@ func (p *AgentPool) remoteAgents() map[string]agentEndpoint {
 }
 
 // Samples polls /stats on every remote agent concurrently and returns their
-// samples. Agents that fail or time out are skipped for this round. It also
+// samples, each stamped with the agent's node ID and hostname. Agents that
+// fail or time out are skipped for this round. It also
 // records which node owns each sampled container for LocateContainer.
 func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	agents := p.remoteAgents()
@@ -295,6 +296,10 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 				if s.ID == "" || s.Name == "" {
 					continue
 				}
+				// Attribute the sample to the node the pool discovered the
+				// agent on; whatever the agent reported is overridden.
+				s.NodeID = nodeID
+				s.NodeHostname = a.hostname
 				samples = append(samples, s)
 				owners[s.ID] = nodeID
 				owners[s.Name] = nodeID

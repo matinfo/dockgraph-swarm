@@ -118,7 +118,7 @@ func (d *DockerCollector) snapshot(ctx context.Context) (GraphSnapshot, error) {
 	if err != nil {
 		return GraphSnapshot{}, err
 	}
-	d.storeTaskFingerprint(taskFingerprint(res.tasks))
+	d.storeTaskFingerprint(taskFingerprint(res.tasks, res.nodes))
 	return buildSwarmSnapshot(res), nil
 }
 
@@ -137,8 +137,8 @@ func (d *DockerCollector) taskSetChanged(fp uint64) bool {
 	return !d.hasFP || d.taskFP != fp
 }
 
-// taskPollLoop periodically lists swarm tasks and re-snapshots only when the
-// task set changed. Task transitions on remote nodes emit no events on the
+// taskPollLoop periodically lists swarm tasks and nodes and re-snapshots only
+// when either set changed. Task transitions on remote nodes emit no events on the
 // manager, so this is how rescheduling and scaling become visible promptly.
 func (d *DockerCollector) taskPollLoop(ctx context.Context) {
 	ticker := time.NewTicker(d.taskPollInterval)
@@ -164,7 +164,12 @@ func (d *DockerCollector) checkTasks(ctx context.Context) {
 		log.Printf("task poll error: %v", err)
 		return
 	}
-	if !d.taskSetChanged(taskFingerprint(tasks)) {
+	nodes, err := d.client.NodeList(callCtx, swarm.NodeListOptions{})
+	if err != nil {
+		log.Printf("node poll error: %v", err)
+		return
+	}
+	if !d.taskSetChanged(taskFingerprint(tasks, nodes)) {
 		return
 	}
 	if err := d.poll(ctx); err != nil {

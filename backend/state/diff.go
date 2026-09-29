@@ -81,8 +81,10 @@ func nodeEqual(a, b collector.Node) bool {
 	// Compose config changes are infrequent (only on file edits), so
 	// reflect.DeepEqual is acceptable here and avoids a fragile field-by-field check.
 	// Service info is only set on swarm service nodes and changes with task
-	// state, which the collector already rate-limits by fingerprint.
-	return reflect.DeepEqual(a.Compose, b.Compose) && reflect.DeepEqual(a.Service, b.Service)
+	// state, which the collector already rate-limits by fingerprint; the same
+	// holds for swarm node info on "swarmnode" nodes.
+	return reflect.DeepEqual(a.Compose, b.Compose) && reflect.DeepEqual(a.Service, b.Service) &&
+		reflect.DeepEqual(a.SwarmNode, b.SwarmNode)
 }
 
 func indexNodes(snap *collector.GraphSnapshot) map[string]collector.Node {

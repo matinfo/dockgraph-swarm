@@ -15,13 +15,27 @@ import (
 // ContainerSample is one container's latest resource usage together with its
 // identity. Per-node agents serve samples so the swarm server can attribute
 // them to tasks and services. Labels carries only the swarm task and service
-// labels (sampleLabelKeys), never the full label set.
+// labels (sampleLabelKeys), never the full label set. NodeID and
+// NodeHostname name the swarm node the container runs on; they are stamped by
+// the swarm server (StatsCollector for local samples, AgentPool for remote
+// ones) and are empty outside swarm mode.
 type ContainerSample struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	Labels map[string]string `json:"labels,omitempty"`
-	Stats  ContainerStats    `json:"stats"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	NodeID       string            `json:"nodeId,omitempty"`
+	NodeHostname string            `json:"nodeHostname,omitempty"`
+	Stats        ContainerStats    `json:"stats"`
 }
+
+// NodeStatsPrefix prefixes the reserved stats keys of per-node aggregates:
+// "node:{hostname}". Container and service names cannot contain ':', so these
+// keys never collide with a container or service series.
+const NodeStatsPrefix = "node:"
+
+// IsNodeSeries reports whether a stats key is a per-node aggregate rather
+// than a container or service series.
+func IsNodeSeries(key string) bool { return strings.HasPrefix(key, NodeStatsPrefix) }
 
 // TaskID returns the swarm task the sampled container runs, or "".
 func (s ContainerSample) TaskID() string { return s.Labels[swarmTaskIDLabel] }
@@ -101,40 +115,53 @@ func PollSamples(ctx context.Context, cli DockerClient, maxWorkers int) []Contai
 	return results
 }
 
-// BuildStatsSnapshot keys samples by container name and adds one aggregate
-// entry per swarm service, keyed by service name, so service graph nodes get
-// stats under their name. Aggregates sum CPU, memory, network, block I/O and
-// PIDs across the service's tasks; CPU throttling takes the worst task. A
-// container whose name equals a service name keeps its own entry.
+// BuildStatsSnapshot keys samples by container name and adds aggregate
+// entries: one per swarm service, keyed by service name, so service graph
+// nodes get stats under their name; and one per swarm node, keyed
+// NodeStatsPrefix+hostname, for samples stamped with a node. Aggregates sum
+// CPU, memory, network, block I/O and PIDs across their containers; CPU
+// throttling takes the worst container. A container whose name equals a
+// service name keeps its own entry. Nodes without samples (e.g. no agent)
+// get no aggregate.
 func BuildStatsSnapshot(samples []ContainerSample) StatsSnapshot {
 	stats := make(map[string]ContainerStats, len(samples))
 	services := make(map[string]ContainerStats)
+	nodes := make(map[string]ContainerStats)
 	for _, s := range samples {
 		stats[s.Name] = s.Stats
-		svc := s.ServiceName()
-		if svc == "" {
-			continue
+		if svc := s.ServiceName(); svc != "" && !IsNodeSeries(svc) {
+			services[svc] = addStats(services[svc], s.Stats)
 		}
-		agg := services[svc]
-		agg.CPUPercent += s.Stats.CPUPercent
-		agg.CPUThrottled = max(agg.CPUThrottled, s.Stats.CPUThrottled)
-		agg.MemUsage += s.Stats.MemUsage
-		agg.MemLimit += s.Stats.MemLimit
-		agg.NetRx += s.Stats.NetRx
-		agg.NetTx += s.Stats.NetTx
-		agg.NetRxErrors += s.Stats.NetRxErrors
-		agg.NetTxErrors += s.Stats.NetTxErrors
-		agg.BlockRead += s.Stats.BlockRead
-		agg.BlockWrite += s.Stats.BlockWrite
-		agg.PIDs += s.Stats.PIDs
-		services[svc] = agg
+		if s.NodeHostname != "" {
+			key := NodeStatsPrefix + s.NodeHostname
+			nodes[key] = addStats(nodes[key], s.Stats)
+		}
 	}
 	for name, agg := range services {
 		if _, taken := stats[name]; !taken {
 			stats[name] = agg
 		}
 	}
+	for key, agg := range nodes {
+		stats[key] = agg
+	}
 	return StatsSnapshot{Stats: stats}
+}
+
+// addStats adds one container's usage to an aggregate.
+func addStats(agg, s ContainerStats) ContainerStats {
+	agg.CPUPercent += s.CPUPercent
+	agg.CPUThrottled = max(agg.CPUThrottled, s.CPUThrottled)
+	agg.MemUsage += s.MemUsage
+	agg.MemLimit += s.MemLimit
+	agg.NetRx += s.NetRx
+	agg.NetTx += s.NetTx
+	agg.NetRxErrors += s.NetRxErrors
+	agg.NetTxErrors += s.NetTxErrors
+	agg.BlockRead += s.BlockRead
+	agg.BlockWrite += s.BlockWrite
+	agg.PIDs += s.PIDs
+	return agg
 }
 
 // mergeSamples appends remote samples to local ones, dropping any remote

@@ -13,6 +13,7 @@ const (
 	nodeTypeContainer = "container"
 	nodeTypeVolume    = "volume"
 	nodeTypeService   = "service"
+	nodeTypeSwarmNode = "swarmnode"
 )
 
 // Docker mount Type values found on container.Mount entries.
