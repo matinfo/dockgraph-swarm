@@ -4,7 +4,7 @@
 
 # DockGraph
 
-Real-time Docker infrastructure visualizer. See your containers, networks, volumes, and their relationships as an interactive graph that updates live as your infrastructure changes.
+Real-time Docker infrastructure visualizer. See your containers, networks, volumes, and their relationships as an interactive graph that updates live as your infrastructure changes. Works on a single Docker host and across a Docker Swarm cluster.
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/dockgraph/dockgraph?logo=github&style=flat)](https://github.com/dockgraph/dockgraph)
 [![License](https://img.shields.io/badge/license-BSL--1.1-blue.svg)](https://github.com/dockgraph/dockgraph/blob/main/LICENSE)
@@ -22,13 +22,16 @@ Real-time Docker infrastructure visualizer. See your containers, networks, volum
 ## Features
 
 - **Live topology graph** — containers, networks, and volumes rendered as an interactive, zoomable graph
-- **Table view** — alternative tabular view with sortable columns, grouping by compose project / network / status / driver, and collapsible groups
-- **Dashboard view** — 13-card monitoring dashboard with resource charts, top consumers, event timeline, alerts, disk usage, images, and compose project overview
+- **Table view** — alternative tabular view with sortable columns, grouping by compose project / stack / network / status / driver, and collapsible groups; a Services tab lists swarm services with their replica counts
+- **Dashboard view** — 13-card monitoring dashboard with resource charts, top consumers, event timeline, alerts, disk usage, images, and compose project / stack overview
 - **Global logs** — a unified, time-ordered log stream that aggregates every container into one view to trace an event across services; filter by text (literal or regex) or container, drill in with per-row filter actions, scroll back through merged history alongside the live tail, and find within (Ctrl+F)
 - **Pop-out log windows** — open any container's logs in a floating, movable and resizable window; drag windows together into tabs, minimize them to a dock, and search within each
 - **Detail panels** — click any resource to inspect stats, ports, mounts, environment, labels, logs, health checks, and network configuration; cross-references (dependencies, networks, mounted volumes) link straight to the related resource, and any value is click-to-copy
 - **Real-time updates** — watches the Docker event stream; the graph reflects changes within seconds
 - **Compose-aware** — parses compose files to show services that haven't started yet, with the same detail panel as running containers (process config, environment, labels, ports, dependencies, and volume mounts) and clickable cross-references into the resources they'll create
+- **Docker Swarm** — on a swarm manager, services are shown with their replica counts, tasks and the nodes they run on, grouped by stack; a lightweight per-node agent brings container stats, inspect and logs from every node of the cluster ([details](#docker-swarm))
+- **Stack scoping** — a header selector scopes the graph, table, dashboard, logs and stats to one compose project or swarm stack (shareable via `?stack=`)
+- **Swarm node view** — switch the graph from networks to nodes to see which tasks run where: managers and workers in their own groups, node health and resource bars, a control-plane link showing worker health, and overlay-network links between services on different nodes; a Swarm Nodes dashboard card and per-node history charts complete the cluster picture
 - **Network grouping** — containers are visually grouped by their primary network
 - **Dependency visualization** — `depends_on` edges with animated flow dots for running services
 - **Volume relationships** — named volume mounts shown as edges between volumes and containers
@@ -36,7 +39,7 @@ Real-time Docker infrastructure visualizer. See your containers, networks, volum
 - **Search and filter** — filter resources by name, type, or status with real-time results across both views
 - **Dark/light theme** — toggle between themes, persisted in localStorage
 - **Click-to-highlight** — click any node or edge to highlight its connections, fading unrelated elements
-- **Password protection** — optional authentication with Argon2id hashing and JWT sessions
+- **Password protection** — optional authentication with Argon2id hashing and JWT sessions; the password can come from a Docker secret (`DG_PASSWORD_FILE`)
 - **Single binary** — frontend is embedded into the Go binary; one container, no external dependencies
 - **Self-excluding** — DockGraph hides its own container, networks, and volumes from the graph
 
@@ -73,7 +76,7 @@ Compose file mounts are optional — they let DockGraph show services defined in
 
 ## Demo
 
-Three demo stacks of increasing complexity are included for showcasing DockGraph at different scales — from a 5-service web app to a ~46-service SaaS platform. See [`demo/README.md`](demo/README.md) for setup and architecture.
+Three demo stacks of increasing complexity are included for showcasing DockGraph at different scales — from a 5-service web app to a ~46-service SaaS platform. Two Docker Swarm stacks (`make demo-swarm`) showcase swarm mode, the stack selector and the node view. See [`demo/README.md`](demo/README.md) for setup and architecture.
 
 ## Configuration
 
@@ -155,6 +158,14 @@ To show services from stack files that are not deployed yet, mount them into the
 
 Demo stacks for swarm are in [`demo/stack-small.yml`](demo/stack-small.yml) and [`demo/stack-medium.yml`](demo/stack-medium.yml) (see [`demo/README.md`](demo/README.md)).
 
+### Swarm views
+
+- **Stack selector** — the header selector scopes every view to one stack (or to standalone containers). The choice lives in the URL (`?stack=`), so a scoped view can be bookmarked or shared.
+- **Graph by network** (default) — services appear inside their overlay networks like containers do, with replica badges. Click a service to open its detail panel: mode, replicas, the task table with the node of each task, and live service logs merged across nodes.
+- **Graph by node** — the **Network | Node** toggle above the graph (`?group=node`) lays out one box per swarm node, with a card for each service listing the tasks it runs there. Managers (leader first) and workers sit in separate, draggable groups. Each box shows the node's role, state, availability and CPU/memory against its capacity; inactive nodes are dimmed. A Managers → Workers link carries worker health (red and dashed with a count when a worker is down). Hovering a service highlights it on every node, and selecting it draws links to services it shares an overlay network with on other nodes. Click a node header for its detail panel.
+- **Table** — a **Services** tab lists swarm services with their replica counts, and the grouping options include the stack.
+- **Dashboard** — a **Swarm Nodes** card lists every node with its role, task count and CPU/memory bars, and the resource history charts switch between **Workload** and **Node** series.
+
 ### Remote task limits
 
 - **Without agents** (no `DG_AGENT_TOKEN`), topology, replica counts and service logs still cover the whole cluster (they come from the manager's swarm API), but container stats, container inspect and container logs are only available for tasks on the server's own node.
@@ -206,6 +217,8 @@ DockGraph runs two collectors concurrently:
 
 Both feed into a state manager that merges their outputs (Docker runtime data takes precedence) and broadcasts the unified graph over WebSocket. The React frontend receives these updates and renders the topology using the [ELK](https://www.eclipse.org/elk/) layout algorithm.
 
+In swarm mode, the Docker collector reads the swarm API instead: services, tasks and nodes, watched through service and node events plus a task poll. The server finds the per-node agents through the `tasks.agent` DNS name, merges their container stats with its own into per-service and per-node aggregates, and forwards container inspect and log requests to the node that runs the container.
+
 For implementation details, see the [backend](backend/README.md) and [frontend](frontend/README.md) READMEs.
 
 ## Development
@@ -225,6 +238,8 @@ make test-coverage  # Run tests with coverage reports (enforces thresholds)
 make lint           # Run all linters (golangci-lint + eslint)
 make docker         # Build Docker image locally
 make docker-up      # Start with Docker Compose
+make swarm-deploy   # Deploy stack.yml to a swarm (needs the dg_agent_token secret)
+make demo-swarm     # Deploy the swarm demo stacks
 make help           # Show all available targets
 ```
 
@@ -249,7 +264,10 @@ The Vite dev server proxies `/ws` and `/healthz` to the backend at `localhost:78
 ```bash
 make test              # Run all tests
 make test-coverage     # Run with coverage (backend profile + frontend thresholds)
+make swarm-smoke       # Swarm end-to-end smoke test (opt-in, not run in CI)
 ```
+
+The swarm smoke test builds the image, deploys `stack.yml` and a throwaway demo stack on the local daemon, and checks the API, the WebSocket snapshot, the node view data (swarm nodes, task placement, per-node stats) and `DG_PASSWORD_FILE` login from a Docker secret. On an existing swarm it only removes what it created. Outside a swarm, `make swarm-smoke` runs `docker swarm init` first and `docker swarm leave --force` at the end; `./test/swarm_smoke.sh` without `--yes` refuses to do that.
 
 ## Tech Stack
 
