@@ -40,8 +40,19 @@ export function listSwarmNodes(dgNodes: DGNode[]): DGNode[] {
 }
 
 /**
- * Places every task that should be running (desiredState "running") of the
- * services in `dgNodes` onto its swarm node. Keys are swarmnode graph ids, or
+ * True for a task swarm still keeps on its node: any desired state except
+ * "shutdown" and "remove". Job tasks end with desired state "complete" and
+ * stay listed. Mirrors the backend's active-task check in buildServiceInfo;
+ * the other tasks it sends are recent failures, shown only in the service
+ * detail panel.
+ */
+export function isActiveTask(task: TaskInfo): boolean {
+  return task.desiredState !== 'shutdown' && task.desiredState !== 'remove';
+}
+
+/**
+ * Places every active task (see isActiveTask) of the services in `dgNodes`
+ * onto its swarm node. Keys are swarmnode graph ids, or
  * UNASSIGNED_NODE_GROUP_ID for tasks without a (known) node — typically
  * pending tasks the scheduler couldn't place. Each list is sorted by stack,
  * service and slot, so tasks read as grouped by service.
@@ -59,7 +70,7 @@ export function placeTasks(dgNodes: DGNode[]): Map<string, PlacedTask[]> {
   for (const service of dgNodes) {
     if (service.type !== 'service') continue;
     for (const task of service.service?.tasks ?? []) {
-      if (task.desiredState !== 'running') continue;
+      if (!isActiveTask(task)) continue;
       const group =
         (task.nodeHostname && byHostname.get(task.nodeHostname)) ||
         (task.nodeId && byNodeId.get(task.nodeId)) ||
