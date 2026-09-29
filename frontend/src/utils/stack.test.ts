@@ -216,6 +216,8 @@ describe('consumerStats', () => {
     expect(serviceOfTask('shop_web.backup')).toBeUndefined();
     expect(serviceOfTask('shop_web.1.backup')).toBeUndefined();
     expect(serviceOfTask(`shop_web.1.${id}.old`)).toBeUndefined();
+    expect(serviceOfTask(`shop.api.1.${id}`)).toBe('shop.api');
+    expect(serviceOfTask(`shop.api.${node}.${id}`)).toBe('shop.api');
   });
 
   it('counts each workload once', () => {
@@ -227,7 +229,9 @@ describe('consumerStats', () => {
       ['shop_web.backup', s], // standalone container with a dotted name: kept
       ['db', s],
       ['node:mgr', s], // node aggregate: dropped
+      ['shop.api', s], // dotted service aggregate
+      [`shop.api.1.${id}`, s], // its task: covered by the aggregate
     ]);
-    expect([...consumerStats(m).keys()]).toEqual(['shop_web', `orphan_svc.1.${id}`, 'shop_web.backup', 'db']);
+    expect([...consumerStats(m).keys()]).toEqual(['shop_web', `orphan_svc.1.${id}`, 'shop_web.backup', 'db', 'shop.api']);
   });
 });

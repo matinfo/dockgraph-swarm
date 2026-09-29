@@ -59,9 +59,11 @@ export function seriesLabel(key: string): string {
 /**
  * Swarm task container names are `{service}.{slot}.{taskId}` (replicated) or
  * `{service}.{nodeId}.{taskId}` (global); swarm IDs are 25 lowercase base-36
- * characters. Mirrors the backend's task-name check in stats history.
+ * characters. Service names may contain dots, so the service is everything
+ * before the final two task segments. Mirrors the backend's task-name check in
+ * stats history.
  */
-const TASK_NAME = /^([^.]+)\.(?:\d+|[a-z0-9]{25})\.[a-z0-9]{25}$/;
+const TASK_NAME = /^(.+)\.(?:\d+|[a-z0-9]{25})\.[a-z0-9]{25}$/;
 
 /** Service a swarm task container name belongs to, or undefined for any other name. */
 export function serviceOfTask(name: string): string | undefined {
