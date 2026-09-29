@@ -18,6 +18,33 @@ interface ConnectedElements {
   highlightedGroupIds: Set<string>;
 }
 
+/** Service graph id carried by a per-node service card, if `n` is one. */
+export function serviceIdOf(n: RFNode | null | undefined): string | undefined {
+  if (n?.type !== 'nodeServiceCard') return undefined;
+  return (n.data as { serviceId?: string }).serviceId;
+}
+
+/** Ids of every node nested (at any depth) under `groupId`. */
+function descendantIds(groupId: string, nodes: RFNode[]): Set<string> {
+  const byParent = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (!n.parentId) continue;
+    const list = byParent.get(n.parentId) ?? [];
+    list.push(n.id);
+    byParent.set(n.parentId, list);
+  }
+  const out = new Set<string>();
+  const stack = [groupId];
+  while (stack.length > 0) {
+    for (const id of byParent.get(stack.pop()!) ?? []) {
+      if (out.has(id)) continue;
+      out.add(id);
+      stack.push(id);
+    }
+  }
+  return out;
+}
+
 /**
  * Walks the graph from the selected element to find all directly connected
  * nodes, edges, and parent groups that should remain fully visible.
@@ -42,11 +69,14 @@ export function resolveConnectedElements(
     if (isGroupSelection) {
       // Group selection: highlight all children + edges touching children +
       // parent groups of remote endpoints for cross-group context.
+      // Groups nest in the per-node view (role group → node box → cards),
+      // so every descendant lights up, and nested groups stay visible.
       highlightedGroupIds.add(selection.id);
-      const childIds = new Set(
-        nodes.filter((n) => n.parentId === selection.id).map((n) => n.id),
-      );
-      for (const id of childIds) connectedNodeIds.add(id);
+      const childIds = descendantIds(selection.id, nodes);
+      for (const id of childIds) {
+        connectedNodeIds.add(id);
+        if (isGroupType(nodeById.get(id)?.type)) highlightedGroupIds.add(id);
+      }
       for (const e of edges) {
         if (childIds.has(e.source) || childIds.has(e.target) ||
             e.source === selection.id || e.target === selection.id) {
@@ -61,6 +91,13 @@ export function resolveConnectedElements(
     } else {
       // Single node: highlight directly connected edges and opposite endpoints.
       connectedNodeIds.add(selection.id);
+      // A per-node service card also lights the service's cards on other nodes.
+      const serviceId = serviceIdOf(selectedNode);
+      if (serviceId) {
+        for (const n of nodes) {
+          if (serviceIdOf(n) === serviceId) connectedNodeIds.add(n.id);
+        }
+      }
       for (const e of edges) {
         if (e.source === selection.id || e.target === selection.id) {
           connectedEdgeIds.add(e.id);
@@ -90,10 +127,13 @@ export function resolveConnectedElements(
 
   // For non-group selections, mark parent groups of highlighted nodes as visible
   // so children don't appear highlighted inside a faded-out group.
+  // Walks up nested groups too (card → node box → role group).
   if (!isGroupSelection) {
-    for (const n of nodes) {
-      if (connectedNodeIds.has(n.id) && n.parentId) {
-        highlightedGroupIds.add(n.parentId);
+    for (const id of connectedNodeIds) {
+      let parentId = nodeById.get(id)?.parentId;
+      while (parentId && !highlightedGroupIds.has(parentId)) {
+        highlightedGroupIds.add(parentId);
+        parentId = nodeById.get(parentId)?.parentId;
       }
     }
   }

@@ -2,10 +2,11 @@ import { memo } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { NodeHandles } from './NodeHandles';
 import { InspectButton } from './InspectButton';
-import { SwarmRoleBadge, SwarmAvailabilityChip } from './SwarmNodeBadges';
-import { cpuColor, swarmNodeStateColor } from '../utils/colors';
+import { SwarmRoleBadge, SwarmAvailabilityChip, SwarmStateChip } from './SwarmNodeBadges';
+import { cpuColor, swarmNodeStateColor, swarmRoleColor } from '../utils/colors';
 import { formatBytesShort } from '../utils/formatBytes';
 import { nodeUsage, formatCores } from '../utils/nodeTransform';
+import { NODE_BOX_HEADER_HEIGHT } from '../utils/constants';
 import { useTheme } from '../theme';
 import type { SwarmNodeGroupData } from '../types';
 
@@ -42,17 +43,22 @@ function MiniBar({ label, percent, color, text, title }: MiniBarProps) {
 }
 
 /**
- * Box of the per-node graph view: one swarm node with its tasks inside. The
- * header shows hostname, role (★ for the leader), state, availability when
- * not active, and CPU/memory bars of the node's aggregate usage against its
- * capacity. The Unassigned box holds tasks the scheduler couldn't place.
+ * Box of the per-node graph view: one swarm node with its service cards
+ * inside. The header shows hostname, role (★ for the leader), a state chip
+ * when not ready, availability when not active, and CPU/memory bars of the
+ * node's aggregate usage against its capacity; a stripe in the role colour
+ * tops it. Down, drained and paused nodes are dimmed. The Unassigned box
+ * holds tasks the scheduler couldn't place.
  */
 export const SwarmNodeGroup = memo(function SwarmNodeGroup({ data }: NodeProps) {
-  const { dgNode, unassigned, taskCount, stats, onInfoClick } = data as unknown as SwarmNodeGroupData;
+  const { dgNode, unassigned, role, taskCount, stats, onInfoClick } = data as unknown as SwarmNodeGroupData;
   const { theme } = useTheme();
   const info = dgNode.swarmNode;
-  const stateColor = unassigned ? theme.warning : swarmNodeStateColor(info?.state ?? dgNode.status);
-  const down = !unassigned && (info?.state ?? dgNode.status) !== 'ready';
+  const state = info?.state ?? dgNode.status;
+  const stateColor = unassigned ? theme.warning : swarmNodeStateColor(state);
+  const down = !unassigned && state !== 'ready';
+  const inactive = down || info?.availability === 'drain' || info?.availability === 'pause';
+  const accent = role ? swarmRoleColor(role, theme.mode) : undefined;
   const usage = nodeUsage(info, stats);
   const openInfo = onInfoClick && !unassigned ? () => onInfoClick(dgNode.id) : undefined;
 
@@ -72,7 +78,7 @@ export const SwarmNodeGroup = memo(function SwarmNodeGroup({ data }: NodeProps) 
         borderRadius: 10,
         background: `${theme.panelBg}${theme.mode === 'dark' ? 'cc' : 'e6'}`,
         position: 'relative',
-        opacity: down ? 0.85 : 1,
+        opacity: inactive ? 0.7 : 1,
       }}
     >
       <NodeHandles />
@@ -87,6 +93,7 @@ export const SwarmNodeGroup = memo(function SwarmNodeGroup({ data }: NodeProps) 
           borderBottom: `1px solid ${theme.panelBorder}`,
           borderRadius: '10px 10px 0 0',
           background: theme.nodeBg,
+          ...(accent ? { boxShadow: `inset 0 2px 0 ${accent}` } : null),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -112,6 +119,7 @@ export const SwarmNodeGroup = memo(function SwarmNodeGroup({ data }: NodeProps) 
             {dgNode.name}
           </span>
           <SwarmRoleBadge info={info} />
+          {!unassigned && <SwarmStateChip state={state} />}
           <SwarmAvailabilityChip info={info} />
           <span style={{ flex: 1 }} />
           <span
@@ -153,6 +161,27 @@ export const SwarmNodeGroup = memo(function SwarmNodeGroup({ data }: NodeProps) 
           )}
         </div>
       </div>
+
+      {taskCount === 0 && (
+        <div
+          data-testid="no-tasks"
+          style={{
+            position: 'absolute',
+            top: NODE_BOX_HEADER_HEIGHT,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 10.5,
+            fontStyle: 'italic',
+            color: theme.nodeSubtext,
+          }}
+        >
+          No tasks
+        </div>
+      )}
     </div>
   );
 });

@@ -1,6 +1,6 @@
 import type { Node as RFNode } from '@xyflow/react';
 import { projectOf } from './stack';
-import type { DGNode, TaskInfo, SwarmNodeGroupData, TaskNodeData } from '../types';
+import type { DGNode, TaskInfo, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData, SwarmRole } from '../types';
 
 /** Group id for tasks the scheduler hasn't placed on a node yet. */
 export const UNASSIGNED_NODE_GROUP_ID = 'nodegroup:unassigned';
@@ -84,14 +84,61 @@ function localGroupId(dgNodes: DGNode[], localNodeId: string | null | undefined)
   return dgNodes.find((n) => n.type === 'swarmnode' && n.swarmNode?.id === localNodeId)?.id;
 }
 
+/** Role of a swarm node in the per-node view; anything but a manager is a worker. */
+export function swarmRole(n: DGNode): SwarmRole {
+  return n.swarmNode?.role === 'manager' ? 'manager' : 'worker';
+}
+
+/** Id of the "Managers" / "Workers" container of the per-node view. */
+export function roleGroupId(role: SwarmRole): string {
+  return `rolegroup:${role}`;
+}
+
+/** Hostname segment used in card ids for tasks without a node. */
+const UNASSIGNED_CARD_HOST = '*';
+
 /**
- * Converts the (stack-scoped) graph into the per-swarm-node view: one
- * `nodeGroup` box per swarm node (plus an Unassigned box when some tasks have
- * no node), each holding a `taskNode` card per task that should be running.
- * Standalone containers go into the box of the local node (`localNodeId`,
- * from /api/system/info), or stay free-standing while it is unknown.
- * Networks and volumes are hidden, and no edges are drawn: network wiring
- * means nothing in a placement view.
+ * Stable id of the card for one service on one swarm node. It depends only on
+ * hostname and service name, so it survives task restarts and state changes.
+ */
+export function nodeServiceCardId(hostname: string, serviceName: string): string {
+  return `nodesvc:${hostname}:${serviceName}`;
+}
+
+/** True when a swarm node isn't taking work: down/disconnected, drained or paused. */
+export function isSwarmNodeInactive(n: DGNode): boolean {
+  const info = n.swarmNode;
+  const state = info?.state ?? n.status;
+  if (state !== undefined && state !== 'ready') return true;
+  return info?.availability === 'drain' || info?.availability === 'pause';
+}
+
+/** Splits a node's sorted placed tasks into consecutive runs per service. */
+function groupByService(tasks: PlacedTask[]): { service: DGNode; tasks: TaskInfo[] }[] {
+  const out: { service: DGNode; tasks: TaskInfo[] }[] = [];
+  for (const { service, task } of tasks) {
+    const last = out[out.length - 1];
+    if (last && last.service.id === service.id) last.tasks.push(task);
+    else out.push({ service, tasks: [task] });
+  }
+  return out;
+}
+
+/**
+ * Converts the (stack-scoped) graph into the per-swarm-node view, nested
+ * three levels deep with React Flow parentIds:
+ *
+ *   roleGroup ("Managers" / "Workers") → nodeGroup (one swarm node)
+ *     → nodeServiceCard (one service on that node, holding its tasks)
+ *
+ * A role group is omitted when it has no nodes. Tasks the scheduler couldn't
+ * place go into a free-standing Unassigned box. Standalone containers go into
+ * the box of the local node (`localNodeId`, from /api/system/info), or stay
+ * free-standing while it is unknown. Networks and volumes are hidden and no
+ * edges are drawn: network wiring means nothing in a placement view.
+ *
+ * Positions are left at the origin; layout/nodeLayout.ts places everything.
+ * Parents always precede their children, as React Flow requires.
  */
 export function toNodeGroupedFlowNodes(dgNodes: DGNode[], localNodeId?: string | null): RFNode[] {
   const swarmNodes = listSwarmNodes(dgNodes);
@@ -99,77 +146,112 @@ export function toNodeGroupedFlowNodes(dgNodes: DGNode[], localNodeId?: string |
   const localGroup = localGroupId(dgNodes, localNodeId);
   const containers = dgNodes.filter((n) => n.type === 'container' && n.status !== 'not_running');
 
-  const groups: RFNode[] = [];
-  const children: RFNode[] = [];
+  const roles: RFNode[] = [];
+  const boxes: RFNode[] = [];
+  const cards: RFNode[] = [];
 
-  const addGroup = (id: string, dgNode: DGNode, unassigned: boolean) => {
+  const addBox = (id: string, dgNode: DGNode, parentId: string | undefined, role: SwarmRole | undefined): number => {
     const tasks = placed.get(id) ?? [];
     const local = id === localGroup ? containers : [];
-    const data: SwarmNodeGroupData = { dgNode, taskCount: tasks.length + local.length };
-    if (unassigned) data.unassigned = true;
-    groups.push({
+    const taskCount = tasks.length + local.length;
+    const data: SwarmNodeGroupData = { dgNode, taskCount };
+    if (role) data.role = role;
+    else data.unassigned = true;
+    boxes.push({
       id,
       type: 'nodeGroup',
       position: { x: 0, y: 0 },
+      ...(parentId ? { parentId, extent: 'parent' as const } : null),
+      draggable: false,
       data: data as unknown as Record<string, unknown>,
-      style: { width: 280, height: 110 },
     });
-    for (const { service, task } of tasks) {
-      const taskId = `task:${task.id}`;
+    const host = role ? dgNode.name : UNASSIGNED_CARD_HOST;
+    const inactive = role ? isSwarmNodeInactive(dgNode) : false;
+    for (const { service, tasks: svcTasks } of groupByService(tasks)) {
+      const cardId = nodeServiceCardId(host, service.name);
       const stack = projectOf(service);
-      const taskData: TaskNodeData = {
-        dgNode: { id: taskId, type: 'container', name: taskLabel(service.name, task), status: task.state, stack },
-        task,
+      const cardData: NodeServiceCardData = {
+        dgNode: { id: cardId, type: 'service', name: service.name, status: service.status, stack },
         serviceId: service.id,
         serviceName: service.name,
         stack,
+        tasks: svcTasks,
       };
-      children.push({
-        id: taskId,
-        type: 'taskNode',
+      if (inactive) cardData.nodeInactive = true;
+      cards.push({
+        id: cardId,
+        type: 'nodeServiceCard',
         position: { x: 0, y: 0 },
         parentId: id,
         extent: 'parent',
-        data: taskData as unknown as Record<string, unknown>,
+        draggable: false,
+        data: cardData as unknown as Record<string, unknown>,
       });
     }
     for (const c of local) {
-      children.push({
+      cards.push({
         id: c.id,
         type: 'containerNode',
         position: { x: 0, y: 0 },
         parentId: id,
         extent: 'parent',
+        draggable: false,
         data: { dgNode: c },
       });
     }
+    return taskCount;
   };
 
-  for (const n of swarmNodes) addGroup(n.id, n, false);
+  for (const role of ['manager', 'worker'] as const) {
+    const members = swarmNodes.filter((n) => swarmRole(n) === role);
+    if (members.length === 0) continue;
+    const gid = roleGroupId(role);
+    const group: RFNode = {
+      id: gid,
+      type: 'roleGroup',
+      position: { x: 0, y: 0 },
+      // Role groups are the only draggable nodes of the view; their boxes and
+      // cards follow through parentId.
+      draggable: true,
+      data: {},
+    };
+    roles.push(group);
+    let taskCount = 0;
+    for (const n of members) taskCount += addBox(n.id, n, gid, role);
+    const data: RoleGroupData = { role, nodeCount: members.length, taskCount };
+    group.data = data as unknown as Record<string, unknown>;
+  }
   if (placed.has(UNASSIGNED_NODE_GROUP_ID)) {
-    addGroup(
+    addBox(
       UNASSIGNED_NODE_GROUP_ID,
       { id: UNASSIGNED_NODE_GROUP_ID, type: 'swarmnode', name: 'Unassigned' },
-      true,
+      undefined,
+      undefined,
     );
   }
 
   // Without a known local node, standalone containers stay free-standing.
   const free: RFNode[] = localGroup
     ? []
-    : containers.map((c) => ({ id: c.id, type: 'containerNode', position: { x: 0, y: 0 }, data: { dgNode: c } }));
+    : containers.map((c) => ({
+        id: c.id, type: 'containerNode', position: { x: 0, y: 0 }, draggable: false, data: { dgNode: c },
+      }));
 
-  return [...groups, ...children, ...free];
+  return [...roles, ...boxes, ...cards, ...free];
 }
 
 /**
- * Topology fingerprint of the per-node view: which cards exist and which box
- * holds each. Task moves and new tasks change it (the graph node ids don't,
- * since tasks live inside their service node), so they trigger a relayout.
+ * Topology fingerprint of the per-node view: which boxes and cards exist,
+ * which parent holds each, and how many task rows each card has (its height).
+ * Task state changes and restarts that keep the per-node count leave it
+ * unchanged, so they don't relayout (and don't reset dragged groups).
  */
 export function nodeGroupedTopologyKey(dgNodes: DGNode[], localNodeId?: string | null): string {
   return toNodeGroupedFlowNodes(dgNodes, localNodeId)
-    .map((n) => `${n.id}>${n.parentId ?? ''}`)
+    .map((n) => {
+      const rows = n.type === 'nodeServiceCard' ? (n.data as unknown as NodeServiceCardData).tasks.length : 0;
+      return `${n.id}>${n.parentId ?? ''}#${rows}`;
+    })
     .sort()
     .join(',');
 }

@@ -6,8 +6,22 @@ export const CONTAINER_NODE_HEIGHT = 84;
 /** Fixed height for volume nodes in the ELK layout. */
 export const VOLUME_NODE_HEIGHT = 40;
 
-/** Fixed height for swarm task cards in the per-node graph view. */
-export const TASK_NODE_HEIGHT = 44;
+// --- Per-swarm-node graph view (deterministic layout, see layout/nodeLayout.ts) ---
+
+/** Height of a service card's title row in the per-node view. */
+export const SERVICE_CARD_HEADER_HEIGHT = 28;
+
+/** Height of one task row inside a service card. */
+export const SERVICE_CARD_ROW_HEIGHT = 20;
+
+/** Bottom padding of a service card below its last task row. */
+export const SERVICE_CARD_PADDING_BOTTOM = 6;
+
+/** Height of the swarm node box header (hostname, badges, resource bars). */
+export const NODE_BOX_HEADER_HEIGHT = 66;
+
+/** Minimum height of a swarm node box (header plus a "No tasks" line). */
+export const NODE_BOX_MIN_HEIGHT = 108;
 
 /** Opacity for nodes unrelated to the current selection. */
 export const FADE_OPACITY = 0.2;

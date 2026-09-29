@@ -6,6 +6,7 @@ import {
   Controls,
   Background,
   BackgroundVariant,
+  useReactFlow,
   type Node as RFNode,
   type Edge as RFEdge,
 } from "@xyflow/react";
@@ -17,7 +18,8 @@ import { StackSelector } from "./StackSelector";
 import { GroupByToggle } from "./GroupByToggle";
 import { NetworkGroup } from "./NetworkGroup";
 import { SwarmNodeGroup } from "./SwarmNodeGroup";
-import { TaskNode } from "./TaskNode";
+import { NodeServiceCard } from "./NodeServiceCard";
+import { RoleGroup } from "./RoleGroup";
 import { VolumeNode } from "./VolumeNode";
 import { ElkEdge } from "./ElkEdge";
 import { CanvasEdgeLayer, type CanvasEdgeLayerHandle } from "./CanvasEdgeLayer";
@@ -59,10 +61,12 @@ import { useLogWindows } from "../hooks/useLogWindows";
 import { useSearchFilter } from "../hooks/useSearchFilter";
 import { useGroupBy } from "../hooks/useGroupBy";
 import { useSystemInfo } from "../hooks/useSystemInfo";
-import { networkColor, stackColor } from "../utils/colors";
+import { networkColor, stackColor, swarmRoleColor } from "../utils/colors";
 import { nodeStatsKey, projectOf, resolveNodeRef, taskContainerName, type StackSummary } from "../utils/stack";
 import { useTheme } from "../theme";
-import type { DGNode, DGEdge, ContainerStatsData, SwarmNodeGroupData, TaskNodeData } from "../types";
+import type {
+  DGNode, DGEdge, ContainerStatsData, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData,
+} from "../types";
 import type { ReactNode } from "react";
 
 // Code-split the Table and Dashboard views (the latter pulls in uPlot) so the
@@ -107,7 +111,8 @@ const nodeTypes = {
   networkGroup: NetworkGroup,
   volumeNode: VolumeNode,
   nodeGroup: SwarmNodeGroup,
-  taskNode: TaskNode,
+  roleGroup: RoleGroup,
+  nodeServiceCard: NodeServiceCard,
 };
 
 const edgeTypes = {
@@ -159,6 +164,28 @@ export function FlowCanvas({
     layoutError,
   } = useGraphLayout(dgNodes, dgEdges, theme.edgeStroke, theme.edgeSignal, effectiveGroupBy, localNodeId);
 
+  // Fit the viewport once the layout of a newly chosen grouping has settled
+  // (the ReactFlow `fitView` prop only applies to the first render). fitView
+  // is queued by React Flow until the new nodes are measured.
+  const { fitView } = useReactFlow();
+  const fittedGroupByRef = useRef(effectiveGroupBy);
+  useEffect(() => {
+    if (layoutBusy || fittedGroupByRef.current === effectiveGroupBy) return;
+    fittedGroupByRef.current = effectiveGroupBy;
+    void fitView({ duration: 300 });
+  }, [effectiveGroupBy, layoutBusy, fitView]);
+
+  // Service hovered in the per-node view: its cards on every node get outlined.
+  const [hoveredServiceId, setHoveredServiceId] = useState<string | null>(null);
+  const handleNodeMouseEnter = useCallback((_: React.MouseEvent, node: RFNode) => {
+    if (node.type === "nodeServiceCard") {
+      setHoveredServiceId((node.data as unknown as NodeServiceCardData).serviceId);
+    }
+  }, []);
+  const handleNodeMouseLeave = useCallback((_: React.MouseEvent, node: RFNode) => {
+    if (node.type === "nodeServiceCard") setHoveredServiceId(null);
+  }, []);
+
   // Ids on the canvas, so a detail click only selects what is actually drawn
   // (a swarm node opened from the dashboard has no box in the network view).
   const canvasIdsRef = useRef<Set<string>>(new Set());
@@ -202,8 +229,9 @@ export function FlowCanvas({
     [handleInfoClick],
   );
 
-  // Task cards open their service's panel. The service has no card of its
-  // own in the per-node view, so the clicked task stays the selection.
+  // Per-node service cards (and their task rows) open the service's panel.
+  // The service has no node of its own in that view, so the clicked card
+  // stays the selection.
   const handleTaskInfoClick = useCallback(
     (serviceId: string) => handleInfoClick(resolveNodeRef(dgNodes, serviceId)),
     [dgNodes, handleInfoClick],
@@ -250,14 +278,26 @@ export function FlowCanvas({
         const stats = d.unassigned ? undefined : statsMap.get(nodeStatsKey(d.dgNode.name));
         return { ...n, data: { ...n.data, stats, onInfoClick: handleInfoClickWithSelect } };
       }
-      if (n.type === "taskNode") {
-        const d = n.data as unknown as TaskNodeData;
-        const stats = statsMap.get(taskContainerName(d.serviceName, d.task));
-        return { ...n, data: { ...n.data, stats, onInfoClick: handleTaskInfoClick } };
+      if (n.type === "nodeServiceCard") {
+        const d = n.data as unknown as NodeServiceCardData;
+        const taskStats: Record<string, ContainerStatsData> = {};
+        for (const t of d.tasks) {
+          const s = statsMap.get(taskContainerName(d.serviceName, t));
+          if (s) taskStats[t.id] = s;
+        }
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            taskStats,
+            peerHover: hoveredServiceId !== null && d.serviceId === hoveredServiceId,
+            onInfoClick: handleTaskInfoClick,
+          },
+        };
       }
       return n;
     });
-  }, [nodes, statsMap, handleInfoClickWithSelect, handleTaskInfoClick]);
+  }, [nodes, statsMap, handleInfoClickWithSelect, handleTaskInfoClick, hoveredServiceId]);
 
   // Dashboard cards reference workloads as `container:{name}`; resolve those
   // to the real node (a swarm service, or a prefixed compose name).
@@ -582,8 +622,13 @@ export function FlowCanvas({
         onEdgesChange={onEdgesChange}
         onNodeClick={largeGraph ? handleNodeClick : onNodeClick}
         onPaneClick={handlePaneClick}
+        onNodeMouseEnter={handleNodeMouseEnter}
+        onNodeMouseLeave={handleNodeMouseLeave}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        // Only nodes that opt in via `draggable: true` move: the per-node
+        // view's role groups. Everything else (incl. the network view) stays
+        // fixed, and dragging on a fixed node or the pane pans the canvas.
         nodesDraggable={false}
         nodesConnectable={false}
         elevateNodesOnSelect={false}
@@ -648,11 +693,15 @@ export function FlowCanvas({
               if (node.type === "volumeNode") {
                 return "#f9731640";
               }
-              if (node.type === "nodeGroup") {
-                return theme.nodeGhostBorder + "60";
+              if (node.type === "roleGroup") {
+                return swarmRoleColor((node.data as unknown as RoleGroupData).role, theme.mode) + "30";
               }
-              if (node.type === "taskNode") {
-                return stackColor((node.data as unknown as TaskNodeData).stack);
+              if (node.type === "nodeGroup") {
+                const role = (node.data as unknown as SwarmNodeGroupData).role;
+                return role ? swarmRoleColor(role, theme.mode) + "60" : theme.nodeGhostBorder + "60";
+              }
+              if (node.type === "nodeServiceCard") {
+                return stackColor((node.data as unknown as NodeServiceCardData).stack);
               }
               return theme.nodeBorder;
             }}

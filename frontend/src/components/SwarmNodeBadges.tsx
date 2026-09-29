@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { useTheme } from '../theme';
+import { swarmRoleColor, swarmNodeStateColor } from '../utils/colors';
 import type { SwarmNodeInfo } from '../types';
 
 const chip: React.CSSProperties = {
@@ -20,15 +21,16 @@ export const SwarmRoleBadge = memo(function SwarmRoleBadge({ info }: { info: Swa
   const { theme } = useTheme();
   if (!info) return null;
   const manager = info.role === 'manager';
+  const color = swarmRoleColor(manager ? 'manager' : 'worker', theme.mode);
   return (
     <span
       data-testid="role-badge"
       title={info.leader ? 'Manager (leader)' : manager ? 'Manager' : 'Worker'}
       style={{
         ...chip,
-        color: manager ? theme.accent : theme.nodeSubtext,
-        border: `1px solid ${manager ? theme.accentSoft : theme.panelBorder}`,
-        background: manager ? theme.accentSoft : 'transparent',
+        color,
+        border: `1px solid ${color}55`,
+        background: manager ? `${color}1f` : 'transparent',
       }}
     >
       {info.role}{info.leader ? ' ★' : ''}
@@ -48,6 +50,21 @@ export const SwarmAvailabilityChip = memo(function SwarmAvailabilityChip({ info 
       style={{ ...chip, color, border: `1px solid ${color}88`, background: `${color}1f` }}
     >
       {info.availability}
+    </span>
+  );
+});
+
+/** State chip, shown only when the node is not ready (down, disconnected...). */
+export const SwarmStateChip = memo(function SwarmStateChip({ state }: { state: string | undefined }) {
+  if (!state || state === 'ready') return null;
+  const color = swarmNodeStateColor(state);
+  return (
+    <span
+      data-testid="state-chip"
+      title={`State: ${state}`}
+      style={{ ...chip, color, border: `1px solid ${color}88`, background: `${color}1f` }}
+    >
+      {state}
     </span>
   );
 });

@@ -12,8 +12,11 @@ vi.mock('@xyflow/react', () => ({
 
 import { ThemeProvider } from '../theme';
 import { SwarmNodeGroup } from './SwarmNodeGroup';
-import { TaskNode } from './TaskNode';
-import type { DGNode, SwarmNodeGroupData, TaskNodeData } from '../types';
+import { NodeServiceCard } from './NodeServiceCard';
+import { RoleGroup } from './RoleGroup';
+import { serviceCardHeight } from '../layout/nodeLayout';
+import { INACTIVE_OPACITY } from '../utils/constants';
+import type { DGNode, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData } from '../types';
 import type { ContainerStatsData } from '../types/stats';
 import type { NodeProps } from '@xyflow/react';
 
@@ -75,34 +78,96 @@ describe('SwarmNodeGroup', () => {
   });
 });
 
-describe('TaskNode', () => {
-  const base: TaskNodeData = {
-    dgNode: { id: 'task:t1', type: 'container', name: 'shop_web.1', status: 'running', stack: 'shop' },
-    task: { id: 't1', slot: 1, state: 'running', desiredState: 'running' },
+describe('SwarmNodeGroup states', () => {
+  it('says "No tasks" for an empty node box', () => {
+    renderGroup({ taskCount: 0, role: 'manager' });
+    expect(screen.getByTestId('no-tasks').textContent).toBe('No tasks');
+  });
+
+  it('shows a state chip for a down node', () => {
+    renderGroup({ dgNode: { ...mgr, swarmNode: { ...mgr.swarmNode!, state: 'down' } } });
+    expect(screen.getByTestId('state-chip').textContent).toBe('down');
+    expect((screen.getByTestId('swarm-node-group') as HTMLElement).style.opacity).toBe('0.7');
+  });
+
+  it('does not show a state chip for a ready node', () => {
+    renderGroup({});
+    expect(screen.queryByTestId('state-chip')).toBeNull();
+    expect(screen.queryByTestId('no-tasks')).toBeNull();
+  });
+});
+
+describe('RoleGroup', () => {
+  function renderRole(data: RoleGroupData) {
+    const props = { data } as unknown as NodeProps;
+    return render(<ThemeProvider><RoleGroup {...props} /></ThemeProvider>);
+  }
+
+  it('shows the role title with node and task counts in a legend tab', () => {
+    renderRole({ role: 'manager', nodeCount: 3, taskCount: 5 });
+    expect(screen.getByTestId('role-group-tab').textContent).toContain('Managers · 3');
+    expect(screen.getByTestId('role-group-summary').textContent).toBe('5 tasks');
+    expect(screen.getByTestId('role-group').getAttribute('data-role')).toBe('manager');
+  });
+
+  it('uses a distinct colour per role', () => {
+    renderRole({ role: 'worker', nodeCount: 1, taskCount: 1 });
+    const worker = (screen.getByTestId('role-group') as HTMLElement).style.borderColor;
+    cleanup();
+    renderRole({ role: 'manager', nodeCount: 1, taskCount: 1 });
+    expect(screen.getByTestId('role-group-tab').textContent).toContain('Managers · 1');
+    expect((screen.getByTestId('role-group') as HTMLElement).style.borderColor).not.toBe(worker);
+    expect(screen.getByTestId('role-group-summary').textContent).toBe('1 task');
+  });
+});
+
+describe('NodeServiceCard', () => {
+  const base: NodeServiceCardData = {
+    dgNode: { id: 'nodesvc:mgr:shop_web', type: 'service', name: 'shop_web', stack: 'shop' },
     serviceId: 'service:shop_web',
     serviceName: 'shop_web',
     stack: 'shop',
+    tasks: [
+      { id: 't1', slot: 1, state: 'running', desiredState: 'running' },
+      { id: 't3', slot: 3, state: 'pending', desiredState: 'running', error: 'no suitable node' },
+    ],
   };
-  function renderTask(data: Partial<TaskNodeData>) {
-    const props = { data: { ...base, nodeWidth: 180, ...data } } as unknown as NodeProps;
-    return render(<ThemeProvider><TaskNode {...props} /></ThemeProvider>);
+  function renderCard(data: Partial<NodeServiceCardData>) {
+    const props = { data: { ...base, ...data } } as unknown as NodeProps;
+    return render(<ThemeProvider><NodeServiceCard {...props} /></ThemeProvider>);
   }
 
-  it('shows the task label and stats', () => {
-    renderTask({ stats: { ...stats, cpuPercent: 12 } });
-    expect(screen.getByText('shop_web.1')).toBeDefined();
-    expect(screen.getByText(/12%/)).toBeDefined();
+  it('shows the service, a running badge and one row per task', () => {
+    renderCard({ taskStats: { t1: { ...stats, cpuPercent: 12 } } });
+    expect(screen.getByText('shop_web')).toBeDefined();
+    expect(screen.getByTestId('card-running-badge').textContent).toBe('1/2');
+    const rows = screen.getAllByTestId('task-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('.1');
+    expect(rows[0].textContent).toMatch(/12%/);
+    expect(rows[1].textContent).toContain('no suitable node');
   });
 
-  it('shows the state or error without stats', () => {
-    renderTask({ task: { id: 't1', slot: 1, state: 'pending', desiredState: 'running', error: 'no suitable node' } });
-    expect(screen.getByText('no suitable node')).toBeDefined();
+  it('labels global tasks and sizes the card to its rows', () => {
+    renderCard({ tasks: [{ id: 'g', state: 'running', desiredState: 'running' }] });
+    expect(screen.getByTestId('task-row').textContent).toContain('global');
+    expect((screen.getByTestId('node-service-card') as HTMLElement).style.height).toBe(`${serviceCardHeight(1)}px`);
   });
 
-  it('opens the owning service when clicked', () => {
+  it('opens the service from the card and from a task row', () => {
     const onInfoClick = vi.fn();
-    renderTask({ onInfoClick });
-    fireEvent.click(screen.getByTestId('task-node'));
-    expect(onInfoClick).toHaveBeenCalledWith('service:shop_web');
+    renderCard({ onInfoClick });
+    fireEvent.click(screen.getByTestId('node-service-card'));
+    fireEvent.click(screen.getAllByTestId('task-row')[1]);
+    expect(onInfoClick).toHaveBeenCalledTimes(2);
+    expect(onInfoClick).toHaveBeenNthCalledWith(1, 'service:shop_web');
+    expect(onInfoClick).toHaveBeenNthCalledWith(2, 'service:shop_web');
+  });
+
+  it('outlines peers on hover and dims cards on inactive nodes', () => {
+    renderCard({ peerHover: true, nodeInactive: true });
+    const card = screen.getByTestId('node-service-card') as HTMLElement;
+    expect(card.getAttribute('data-peer-hover')).toBe('true');
+    expect(card.style.opacity).toBe(String(INACTIVE_OPACITY));
   });
 });

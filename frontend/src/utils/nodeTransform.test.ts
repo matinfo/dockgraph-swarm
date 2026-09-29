@@ -5,9 +5,11 @@ import {
   placeTasks,
   nodeUsage,
   UNASSIGNED_NODE_GROUP_ID,
+  roleGroupId,
+  isSwarmNodeInactive,
 } from './nodeTransform';
 import { filterGraphByStack } from './stack';
-import type { DGNode, TaskNodeData, SwarmNodeGroupData } from '../types';
+import type { DGNode, NodeServiceCardData, SwarmNodeGroupData, RoleGroupData } from '../types';
 
 const mgr: DGNode = {
   id: 'swarmnode:mgr', type: 'swarmnode', name: 'mgr', status: 'ready',
@@ -46,31 +48,81 @@ const net: DGNode = { id: 'network:shop_net', type: 'network', name: 'shop_net',
 const all = [web, api, lone, ghost, net, wrk, mgr];
 
 describe('toNodeGroupedFlowNodes', () => {
-  it('creates one box per swarm node, leader first, and an Unassigned box for pending tasks', () => {
+  it('nests boxes in Managers / Workers role groups, leader first, and adds a free Unassigned box', () => {
     const rf = toNodeGroupedFlowNodes(all, 'n1');
-    const groups = rf.filter((n) => n.type === 'nodeGroup');
-    expect(groups.map((g) => g.id)).toEqual(['swarmnode:mgr', 'swarmnode:wrk', UNASSIGNED_NODE_GROUP_ID]);
-    expect((groups[2].data as unknown as SwarmNodeGroupData).unassigned).toBe(true);
+    const roles = rf.filter((n) => n.type === 'roleGroup');
+    expect(roles.map((g) => g.id)).toEqual([roleGroupId('manager'), roleGroupId('worker')]);
+    expect(roles.every((g) => g.draggable === true)).toBe(true);
+    expect(roles[0].data as unknown as RoleGroupData).toEqual({ role: 'manager', nodeCount: 1, taskCount: 3 });
+    expect(roles[1].data as unknown as RoleGroupData).toEqual({ role: 'worker', nodeCount: 1, taskCount: 1 });
+
+    const boxes = rf.filter((n) => n.type === 'nodeGroup');
+    expect(boxes.map((g) => [g.id, g.parentId])).toEqual([
+      ['swarmnode:mgr', 'rolegroup:manager'],
+      ['swarmnode:wrk', 'rolegroup:worker'],
+      [UNASSIGNED_NODE_GROUP_ID, undefined],
+    ]);
+    expect(boxes.every((b) => b.draggable === false)).toBe(true);
+    expect((boxes[0].data as unknown as SwarmNodeGroupData).role).toBe('manager');
+    expect((boxes[2].data as unknown as SwarmNodeGroupData).unassigned).toBe(true);
   });
 
-  it('places running-desired tasks by hostname or node id, sorted by stack then service then slot', () => {
+  it('lists parents before their children', () => {
+    const rf = toNodeGroupedFlowNodes(all, 'n1');
+    const index = new Map(rf.map((n, i) => [n.id, i]));
+    for (const n of rf) {
+      if (n.parentId) expect(index.get(n.parentId)!).toBeLessThan(index.get(n.id)!);
+    }
+  });
+
+  it('omits a role group without nodes', () => {
+    const rf = toNodeGroupedFlowNodes([web, mgr], null);
+    expect(rf.filter((n) => n.type === 'roleGroup').map((n) => n.id)).toEqual(['rolegroup:manager']);
+  });
+
+  it('draws one card per service on each node, with stable ids, sorted by stack then service', () => {
     const rf = toNodeGroupedFlowNodes(all, 'n1');
     const inMgr = rf.filter((n) => n.parentId === 'swarmnode:mgr');
-    // blog < shop; standalone containers after the tasks.
-    expect(inMgr.map((n) => n.id)).toEqual(['task:g1', 'task:t1', 'container:lone']);
-    expect(rf.filter((n) => n.parentId === 'swarmnode:wrk').map((n) => n.id)).toEqual(['task:t2']);
-    expect(rf.filter((n) => n.parentId === UNASSIGNED_NODE_GROUP_ID).map((n) => n.id)).toEqual(['task:t3']);
-    expect(rf.some((n) => n.id === 'task:old')).toBe(false);
+    // blog < shop; standalone containers after the cards.
+    expect(inMgr.map((n) => n.id)).toEqual(['nodesvc:mgr:blog_api', 'nodesvc:mgr:shop_web', 'container:lone']);
+    expect(rf.filter((n) => n.parentId === 'swarmnode:wrk').map((n) => n.id)).toEqual(['nodesvc:wrk:shop_web']);
+    expect(rf.filter((n) => n.parentId === UNASSIGNED_NODE_GROUP_ID).map((n) => n.id)).toEqual(['nodesvc:*:shop_web']);
 
-    const t1 = rf.find((n) => n.id === 'task:t1')!;
-    expect(t1.type).toBe('taskNode');
-    const d = t1.data as unknown as TaskNodeData;
-    expect(d.dgNode.name).toBe('shop_web.1');
+    const card = rf.find((n) => n.id === 'nodesvc:mgr:shop_web')!;
+    expect(card.type).toBe('nodeServiceCard');
+    const d = card.data as unknown as NodeServiceCardData;
     expect(d.serviceId).toBe('service:shop_web');
+    expect(d.serviceName).toBe('shop_web');
     expect(d.stack).toBe('shop');
-    const g1 = rf.find((n) => n.id === 'task:g1')!.data as unknown as TaskNodeData;
-    expect(g1.dgNode.name).toBe('blog_api');
+    // Only running-desired tasks: the shut-down "old" task is gone.
+    expect(d.tasks.map((t) => t.id)).toEqual(['t1']);
     expect((rf.find((n) => n.id === 'swarmnode:mgr')!.data as unknown as SwarmNodeGroupData).taskCount).toBe(3);
+  });
+
+  it('groups several tasks of a service on one node into one card, by slot', () => {
+    const multi: DGNode = {
+      ...web,
+      service: {
+        ...web.service!,
+        tasks: [
+          { id: 'b', slot: 3, nodeHostname: 'wrk', state: 'running', desiredState: 'running' },
+          { id: 'a', slot: 1, nodeHostname: 'wrk', state: 'starting', desiredState: 'running' },
+        ],
+      },
+    };
+    const rf = toNodeGroupedFlowNodes([multi, mgr, wrk], null);
+    const cards = rf.filter((n) => n.type === 'nodeServiceCard');
+    expect(cards.map((c) => c.id)).toEqual(['nodesvc:wrk:shop_web']);
+    expect((cards[0].data as unknown as NodeServiceCardData).tasks.map((t) => t.slot)).toEqual([1, 3]);
+  });
+
+  it('marks cards on drained or down nodes as inactive', () => {
+    const rf = toNodeGroupedFlowNodes(all, 'n1');
+    const on = (id: string) => (rf.find((n) => n.id === id)!.data as unknown as NodeServiceCardData).nodeInactive;
+    expect(on('nodesvc:wrk:shop_web')).toBe(true); // wrk is drained
+    expect(on('nodesvc:mgr:shop_web')).toBeUndefined();
+    expect(isSwarmNodeInactive({ ...mgr, swarmNode: { ...mgr.swarmNode!, state: 'down' } })).toBe(true);
+    expect(isSwarmNodeInactive(mgr)).toBe(false);
   });
 
   it('hides networks, volumes and not-running containers', () => {
@@ -90,19 +142,32 @@ describe('toNodeGroupedFlowNodes', () => {
     const { nodes } = filterGraphByStack(all, [], 'blog');
     const rf = toNodeGroupedFlowNodes(nodes, 'n1');
     expect(rf.filter((n) => n.type === 'nodeGroup').map((n) => n.id)).toEqual(['swarmnode:mgr', 'swarmnode:wrk']);
-    expect(rf.filter((n) => n.type === 'taskNode').map((n) => n.id)).toEqual(['task:g1']);
+    expect(rf.filter((n) => n.type === 'nodeServiceCard').map((n) => n.id)).toEqual(['nodesvc:mgr:blog_api']);
     expect(rf.some((n) => n.id === 'container:lone')).toBe(false);
   });
 });
 
 describe('nodeGroupedTopologyKey', () => {
+  const withTasks = (tasks: NonNullable<DGNode['service']>['tasks']): DGNode => ({ ...web, service: { ...web.service!, tasks } });
+
   it('changes when a task moves to another node', () => {
     const before = nodeGroupedTopologyKey(all, 'n1');
-    const moved: DGNode = {
-      ...web,
-      service: { ...web.service!, tasks: web.service!.tasks!.map((t) => (t.id === 't2' ? { ...t, nodeId: 'n1', nodeHostname: 'mgr' } : t)) },
-    };
+    const moved = withTasks(web.service!.tasks!.map((t) => (t.id === 't2' ? { ...t, nodeId: 'n1', nodeHostname: 'mgr' } : t)));
     expect(nodeGroupedTopologyKey([moved, api, lone, wrk, mgr], 'n1')).not.toBe(before);
+  });
+
+  it('ignores task state changes and restarts that keep the per-node count', () => {
+    const base = [web, api, lone, wrk, mgr];
+    const before = nodeGroupedTopologyKey(base, 'n1');
+    const restarted = withTasks(web.service!.tasks!.map((t) =>
+      t.id === 't1' ? { ...t, id: 't1-new', state: 'starting' } : t));
+    expect(nodeGroupedTopologyKey([restarted, api, lone, wrk, mgr], 'n1')).toBe(before);
+  });
+
+  it('changes when a card gains a task row', () => {
+    const before = nodeGroupedTopologyKey(all, 'n1');
+    const more = withTasks([...web.service!.tasks!, { id: 't4', slot: 4, nodeHostname: 'wrk', state: 'running', desiredState: 'running' }]);
+    expect(nodeGroupedTopologyKey([more, api, lone, ghost, net, wrk, mgr], 'n1')).not.toBe(before);
   });
 });
 

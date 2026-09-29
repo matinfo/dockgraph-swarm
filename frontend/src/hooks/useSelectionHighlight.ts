@@ -7,6 +7,7 @@ import {
   resolveConnectedElements,
   styleNodesForSelection,
   styleEdgesForSelection,
+  serviceIdOf,
 } from '../utils/selectionGraph';
 import { isGroupType } from '../layout/elkGraph';
 
@@ -23,16 +24,13 @@ interface HighlightResult {
 }
 
 /**
- * True when a node stays lit under an active search: groups always do, task
- * cards follow their owning service.
+ * True when a node stays lit under an active search: groups always do,
+ * per-node service cards follow their service.
  */
-function matchesSearch(n: RFNode, matchingNodeIds: Set<string>): boolean {
+export function matchesSearch(n: RFNode, matchingNodeIds: Set<string>): boolean {
   if (isGroupType(n.type) || matchingNodeIds.has(n.id)) return true;
-  if (n.type === 'taskNode') {
-    const serviceId = (n.data as { serviceId?: string }).serviceId;
-    return serviceId !== undefined && matchingNodeIds.has(serviceId);
-  }
-  return false;
+  const serviceId = serviceIdOf(n);
+  return serviceId !== undefined && matchingNodeIds.has(serviceId);
 }
 
 /**

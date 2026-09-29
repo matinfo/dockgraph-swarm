@@ -6,6 +6,7 @@ import {
   type Edge as RFEdge,
 } from '@xyflow/react';
 import { computeLayout } from '../layout/elk';
+import { layoutNodeGroups } from '../layout/nodeLayout';
 import { toReactFlowNodes, toReactFlowEdges } from '../utils/graphTransform';
 import { toNodeGroupedFlowNodes, nodeGroupedTopologyKey } from '../utils/nodeTransform';
 import type { GroupBy } from './useGroupBy';
@@ -57,11 +58,14 @@ function buildFlow(
 }
 
 /**
- * Manages ELK layout computation and lightweight in-place updates.
+ * Manages layout computation and lightweight in-place updates.
  *
  * When the topology changes (nodes/edges added or removed), runs a full
- * async ELK layout. When only data changes (status, ports, etc.), patches
- * the existing positioned nodes/edges without relayout.
+ * layout: async ELK for the network view, the deterministic grid of
+ * layout/nodeLayout.ts for the per-node view. When only data changes
+ * (status, ports, stats, etc.), patches the existing positioned nodes/edges
+ * without relayout — positions are kept, so role groups the user dragged
+ * stay where they were dropped until the next topology change or view switch.
  *
  * `groupBy` picks the network view (default) or the per-swarm-node view;
  * `localNodeId` is the swarm node id of the local daemon, which hosts the
@@ -98,7 +102,12 @@ export function useGraphLayout(
 
     const { rfNodes, rfEdges } = buildFlow(dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId);
 
-    computeLayout(rfNodes, rfEdges)
+    // The per-node view has a deterministic grid layout (no ELK, no edges).
+    const layoutPromise = groupBy === 'node'
+      ? Promise.resolve({ nodes: layoutNodeGroups(rfNodes), edges: rfEdges })
+      : computeLayout(rfNodes, rfEdges);
+
+    layoutPromise
       .then((layout) => {
         if (cancelled) return;
         setNodes(layout.nodes);

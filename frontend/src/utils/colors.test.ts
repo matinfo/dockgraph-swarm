@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { networkColor, hashString, STATUS_COLORS, STATUS_LABELS } from './colors';
+import { networkColor, hashString, STATUS_COLORS, STATUS_LABELS, swarmRoleColor } from './colors';
 
 describe('hashString', () => {
   it('returns a non-negative integer', () => {
@@ -80,5 +80,15 @@ describe('networkColor with a stack', () => {
 
   it('keeps names without the prefix as-is', () => {
     expect(networkColor('proxy', 'shop')).toBe(networkColor('proxy'));
+  });
+});
+
+describe('swarmRoleColor', () => {
+  it('gives managers and workers distinct colours in both themes', () => {
+    for (const mode of ['dark', 'light'] as const) {
+      expect(swarmRoleColor('manager', mode)).toMatch(/^#[0-9a-f]{6}$/);
+      expect(swarmRoleColor('manager', mode)).not.toBe(swarmRoleColor('worker', mode));
+    }
+    expect(swarmRoleColor('worker', 'dark')).not.toBe(swarmRoleColor('worker', 'light'));
   });
 });

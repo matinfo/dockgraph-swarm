@@ -71,6 +71,22 @@ export function swarmNodeStateColor(state: string | undefined): string {
   return SWARM_NODE_STATE_COLORS[state ?? 'unknown'] ?? SWARM_NODE_STATE_COLORS.unknown;
 }
 
+/**
+ * Identity colours of swarm node roles in the per-node view (role group
+ * frame, title tab, node box accent, role badge, minimap). Violet for
+ * managers and cyan for workers stay clear of the green/amber/red state
+ * colours; the light variants are darker for contrast on the paper canvas.
+ */
+export const SWARM_ROLE_COLORS: Record<'manager' | 'worker', { dark: string; light: string }> = {
+  manager: { dark: '#a78bfa', light: '#7c3aed' },
+  worker: { dark: '#22d3ee', light: '#0e7490' },
+};
+
+/** Colour of a swarm node role for the given theme mode. */
+export function swarmRoleColor(role: 'manager' | 'worker', mode: 'dark' | 'light'): string {
+  return SWARM_ROLE_COLORS[role][mode];
+}
+
 export const STATUS_COLORS: Record<string, string> = {
   running: '#22c55e',
   unhealthy: '#f59e0b',

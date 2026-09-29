@@ -142,12 +142,26 @@ export interface NetworkGroupData {
   onInfoClick?: (networkId: string) => void;
 }
 
+/** Swarm node role in the per-node graph view ("manager" or "worker"). */
+export type SwarmRole = 'manager' | 'worker';
+
+/** A role container ("Managers" / "Workers") of the per-node graph view. */
+export interface RoleGroupData {
+  role: SwarmRole;
+  /** Number of swarm node boxes in the group. */
+  nodeCount: number;
+  /** Number of tasks (and local containers) across those boxes. */
+  taskCount: number;
+}
+
 /** A swarm node box in the per-node graph view. */
 export interface SwarmNodeGroupData {
   /** The swarmnode graph node, or a synthetic one for the Unassigned group. */
   dgNode: DGNode;
   /** True for the group of tasks not yet placed on a node. */
   unassigned?: boolean;
+  /** Role of the node, for its accent colour (absent for Unassigned). */
+  role?: SwarmRole;
   /** Number of tasks (and local containers) placed in the box. */
   taskCount: number;
   /** Aggregate stats for the node (`node:{hostname}`), when an agent reports them. */
@@ -155,18 +169,26 @@ export interface SwarmNodeGroupData {
   onInfoClick?: (nodeId: string) => void;
 }
 
-/** A single swarm task inside a node box of the per-node graph view. */
-export interface TaskNodeData {
-  /** Synthetic node carrying the task label (`{service}.{slot}`) for layout sizing. */
+/**
+ * One service on one swarm node in the per-node graph view: a card holding
+ * the service's tasks placed on that node (id `nodesvc:{hostname}:{service}`).
+ */
+export interface NodeServiceCardData {
+  /** Synthetic node carrying the service name and stack (search, minimap). */
   dgNode: DGNode;
-  task: TaskInfo;
-  /** Graph id of the owning service (`service:{name}`). */
+  /** Graph id of the service (`service:{name}`). */
   serviceId: string;
   serviceName: string;
   stack?: string;
-  nodeWidth?: number;
-  stats?: import('./types/stats').ContainerStatsData;
-  /** Opens the detail panel for the given graph node (the owning service). */
+  /** The service's running-desired tasks on this node, by slot. */
+  tasks: TaskInfo[];
+  /** True when the hosting node is down, drained or paused. */
+  nodeInactive?: boolean;
+  /** Per-task live stats keyed by task id, injected by the canvas. */
+  taskStats?: Record<string, import('./types/stats').ContainerStatsData>;
+  /** True while a card of the same service (on any node) is hovered. */
+  peerHover?: boolean;
+  /** Opens the detail panel for the given graph node (the service). */
   onInfoClick?: (nodeId: string) => void;
 }
 
