@@ -138,8 +138,8 @@ body {
 `;
 }
 
-/** Strips the `.{slot|nodeId}.{taskId}` suffix of a per-task stats key. */
-const TASK_KEY_SUFFIX = /\.[^.]+\.[^.]+$/;
+/** Strips a real `.{slot|nodeId}.{taskId}` suffix from a per-task stats key. */
+const TASK_KEY_SUFFIX = /\.(?:\d+|[a-z0-9]{25})\.[a-z0-9]{25}$/;
 
 function AppContent() {
   const { stats, handleStatsMessage } = useContainerStats();
