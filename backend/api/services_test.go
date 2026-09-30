@@ -354,6 +354,12 @@ func TestAggregateLogsHistoryStackStandalone(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodGet, "/api/logs/history?stack=x", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("one-character stack: status %d, want 200", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
 	h(rec, httptest.NewRequest(http.MethodGet, "/api/logs/history?stack=../x", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid stack: status %d", rec.Code)
@@ -467,10 +473,12 @@ func TestHandleStatsHistoryStackFilter(t *testing.T) {
 	h.Record(time.Now().Add(-time.Minute), collector.StatsSnapshot{Stats: map[string]collector.ContainerStats{
 		"shop-web-1": {CPUPercent: 1},
 		"blog-app-1": {CPUPercent: 2},
+		"a-db-1":     {CPUPercent: 3},
 	}})
 	lister := mockLister{summaries: []containertypes.Summary{
 		{Names: []string{"/shop-web-1"}, Labels: map[string]string{"com.docker.compose.project": "shop"}},
 		{Names: []string{"/blog-app-1"}, Labels: map[string]string{collector.StackNamespaceLabel: "blog"}},
+		{Names: []string{"/a-db-1"}, Labels: map[string]string{"com.docker.compose.project": "a"}},
 	}}
 	handler := HandleStatsHistory(h, lister, nil)
 
@@ -478,8 +486,9 @@ func TestHandleStatsHistoryStackFilter(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"", []string{"shop-web-1", "blog-app-1"}},
+		{"", []string{"shop-web-1", "blog-app-1", "a-db-1"}},
 		{"&stack=shop", []string{"shop-web-1"}},
+		{"&stack=a", []string{"a-db-1"}}, // one-character project names are valid
 		{"&stack=blog", []string{"blog-app-1"}},
 		{"&stack=none", nil},
 	}

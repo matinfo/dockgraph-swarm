@@ -177,7 +177,7 @@ func HandleAggregateLogsHistory(lister ContainerLister, logger ContainerLogger, 
 		}
 		before := r.URL.Query().Get("before")
 		scope := newLogScope(r, services)
-		if scope.stack != "" && !validResourceName.MatchString(scope.stack) {
+		if scope.stack != "" && !validStackName.MatchString(scope.stack) {
 			jsonError(w, "invalid stack", http.StatusBadRequest)
 			return
 		}
@@ -308,7 +308,7 @@ func HandleAggregateLogs(lister ContainerLister, logger ContainerLogger, eventsS
 		}
 		disableWriteDeadline(w)
 		scope := newLogScope(r, services)
-		if scope.stack != "" && !validResourceName.MatchString(scope.stack) {
+		if scope.stack != "" && !validStackName.MatchString(scope.stack) {
 			jsonError(w, "invalid stack", http.StatusBadRequest)
 			return
 		}
