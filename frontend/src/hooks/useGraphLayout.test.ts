@@ -46,4 +46,20 @@ describe('useGraphLayout', () => {
     rerender({ nodes: [web], edges: [] });
     await waitFor(() => expect(result.current.nodes.some((n) => n.id === 'container:web')).toBe(true));
   });
+
+  it('reparents a workload whose primary network changes', async () => {
+    const front: DGNode = { id: 'network:front', type: 'network', name: 'front' };
+    const back: DGNode = { id: 'network:back', type: 'network', name: 'back' };
+    const onFront = { ...web, networkId: front.id, source: 'compose.yml' };
+    const onBack = { ...db, networkId: back.id, source: 'compose.yml' };
+    const parentOf = (nodes: { id: string; parentId?: string }[], id: string) =>
+      nodes.find((n) => n.id === id)?.parentId;
+
+    const { result, rerender } = render({ nodes: [front, back, onFront, onBack], edges: [] });
+    await waitFor(() => expect(parentOf(result.current.nodes, web.id)).toBe(front.id));
+
+    // Same node and edge IDs; only web's primary network changes.
+    rerender({ nodes: [front, back, { ...onFront, networkId: back.id }, onBack], edges: [] });
+    await waitFor(() => expect(parentOf(result.current.nodes, web.id)).toBe(back.id));
+  });
 });
