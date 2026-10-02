@@ -14,6 +14,7 @@ import (
 	networktypes "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/dockgraph/dockgraph/collector"
+	"github.com/dockgraph/dockgraph/secrets"
 )
 
 // ServiceInspector is the subset of the Docker API needed to inspect a swarm
@@ -165,7 +166,7 @@ func buildServiceInspectResponse(ctx context.Context, svc swarm.Service, tasks [
 		// Set to true when the task list could not be read.
 		"tasksUnavailable": false,
 		"tasks":            info.Tasks,
-		fieldLabels:        maskLabels(svc.Spec.Labels),
+		fieldLabels:        secrets.MaskLabels(svc.Spec.Labels),
 		"createdAt":        svc.CreatedAt,
 		"updatedAt":        svc.UpdatedAt,
 		"ports":            buildServicePorts(svc.Endpoint.Ports),
