@@ -11,7 +11,7 @@ import {
   type Edge as RFEdge,
 } from "@xyflow/react";
 import { ANIMATION_NODE_LIMIT, DETAIL_PANEL_WIDTH, Z } from "../utils/constants";
-import { SWARM_LINK_EDGE_TYPE, controlLinkEdge, overlayLinkEdges } from "../utils/swarmLinks";
+import { SWARM_LINK_EDGE_TYPE, controlLinkEdges, overlayLinkEdges } from "../utils/swarmLinks";
 import { serviceIdOf, type SelectionState } from "../utils/selectionGraph";
 
 import { ContainerNode } from "./ContainerNode";
@@ -22,6 +22,7 @@ import { NetworkGroup } from "./NetworkGroup";
 import { SwarmNodeGroup } from "./SwarmNodeGroup";
 import { NodeServiceCard } from "./NodeServiceCard";
 import { RoleGroup } from "./RoleGroup";
+import { ControlSummary } from "./ControlSummary";
 import { VolumeNode } from "./VolumeNode";
 import { ElkEdge } from "./ElkEdge";
 import { SwarmLinkEdge } from "./SwarmLinkEdge";
@@ -116,6 +117,7 @@ const nodeTypes = {
   nodeGroup: SwarmNodeGroup,
   roleGroup: RoleGroup,
   nodeServiceCard: NodeServiceCard,
+  controlSummary: ControlSummary,
 };
 
 const edgeTypes = {
@@ -357,22 +359,22 @@ export function FlowCanvas({
     [closeDetail, clearAll],
   );
 
-  // Per-node view links: the Managers → Workers control link always, plus
+  // Per-node view links: the Managers → Workers control spokes always, plus
   // overlay links from a selected service card to its network peers.
-  const controlLink = useMemo(
-    () => (effectiveGroupBy === "node" ? controlLinkEdge(dgNodes) : null),
+  const controlLinks = useMemo(
+    () => (effectiveGroupBy === "node" ? controlLinkEdges(dgNodes) : []),
     [effectiveGroupBy, dgNodes],
   );
   const linkEdgesFor = useCallback(
     (selection: SelectionState | null): RFEdge[] => {
       if (effectiveGroupBy !== "node") return [];
-      const links = controlLink ? [controlLink] : [];
+      const links = [...controlLinks];
       const selected = selection?.type === "node" ? nodes.find((n) => n.id === selection.id) : undefined;
       const serviceId = serviceIdOf(selected);
       if (serviceId) links.push(...overlayLinkEdges(dgNodes, dgEdges, nodes, serviceId));
       return links;
     },
-    [effectiveGroupBy, controlLink, nodes, dgNodes, dgEdges],
+    [effectiveGroupBy, controlLinks, nodes, dgNodes, dgEdges],
   );
 
   const {

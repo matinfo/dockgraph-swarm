@@ -1,6 +1,9 @@
 import type { Node as RFNode } from '@xyflow/react';
 import { projectOf } from './stack';
-import type { DGNode, TaskInfo, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData, SwarmRole } from '../types';
+import type { DGNode, TaskInfo, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData, ControlSummaryData, SwarmRole } from '../types';
+
+/** Id of the control-plane summary pill between the Managers and Workers groups. */
+export const CONTROL_SUMMARY_ID = 'controlsummary';
 
 /** Group id for tasks the scheduler hasn't placed on a node yet. */
 export const UNASSIGNED_NODE_GROUP_ID = 'nodegroup:unassigned';
@@ -213,9 +216,13 @@ export function toNodeGroupedFlowNodes(dgNodes: DGNode[], localNodeId?: string |
     return taskCount;
   };
 
+  let hasManagers = false;
+  let workers: DGNode[] = [];
   for (const role of ['manager', 'worker'] as const) {
     const members = swarmNodes.filter((n) => swarmRole(n) === role);
     if (members.length === 0) continue;
+    if (role === 'manager') hasManagers = true;
+    else workers = members;
     const gid = roleGroupId(role);
     const group: RFNode = {
       id: gid,
@@ -231,6 +238,23 @@ export function toNodeGroupedFlowNodes(dgNodes: DGNode[], localNodeId?: string |
     for (const n of members) taskCount += addBox(n.id, n, gid, role);
     const data: RoleGroupData = { role, nodeCount: members.length, taskCount };
     group.data = data as unknown as Record<string, unknown>;
+  }
+
+  // Control-plane summary pill, free-standing in the gap between the two
+  // groups (see layout/nodeLayout.ts for its position). Only when both a
+  // manager and at least one worker exist, matching the old aggregate link.
+  if (hasManagers && workers.length > 0) {
+    const ready = workers.filter((n) => (n.swarmNode?.state ?? n.status) === 'ready').length;
+    const data: ControlSummaryData = { ready, total: workers.length, healthy: ready === workers.length };
+    roles.push({
+      id: CONTROL_SUMMARY_ID,
+      type: 'controlSummary',
+      position: { x: 0, y: 0 },
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      data: data as unknown as Record<string, unknown>,
+    });
   }
   if (placed.has(UNASSIGNED_NODE_GROUP_ID)) {
     addBox(

@@ -6,11 +6,12 @@ import {
   isActiveTask,
   nodeUsage,
   UNASSIGNED_NODE_GROUP_ID,
+  CONTROL_SUMMARY_ID,
   roleGroupId,
   isSwarmNodeInactive,
 } from './nodeTransform';
 import { filterGraphByStack } from './stack';
-import type { DGNode, NodeServiceCardData, SwarmNodeGroupData, RoleGroupData } from '../types';
+import type { DGNode, NodeServiceCardData, SwarmNodeGroupData, RoleGroupData, ControlSummaryData } from '../types';
 
 const mgr: DGNode = {
   id: 'swarmnode:mgr', type: 'swarmnode', name: 'mgr', status: 'ready',
@@ -79,6 +80,28 @@ describe('toNodeGroupedFlowNodes', () => {
   it('omits a role group without nodes', () => {
     const rf = toNodeGroupedFlowNodes([web, mgr], null);
     expect(rf.filter((n) => n.type === 'roleGroup').map((n) => n.id)).toEqual(['rolegroup:manager']);
+  });
+
+  it('adds a control summary pill when both a manager and a worker exist', () => {
+    const rf = toNodeGroupedFlowNodes(all, 'n1');
+    const summary = rf.find((n) => n.id === CONTROL_SUMMARY_ID)!;
+    expect(summary.type).toBe('controlSummary');
+    expect(summary.draggable).toBe(false);
+    expect(summary.selectable).toBe(false);
+    // wrk is drained but still "ready" — counts as up, like the old aggregate link did.
+    expect(summary.data as unknown as ControlSummaryData).toEqual({ ready: 1, total: 1, healthy: true });
+  });
+
+  it('flags a down worker in the control summary', () => {
+    const down = { ...wrk, swarmNode: { ...wrk.swarmNode!, state: 'down' } };
+    const rf = toNodeGroupedFlowNodes([mgr, down], null);
+    const summary = rf.find((n) => n.id === CONTROL_SUMMARY_ID)!;
+    expect(summary.data as unknown as ControlSummaryData).toEqual({ ready: 0, total: 1, healthy: false });
+  });
+
+  it('omits the control summary without both a manager and a worker', () => {
+    expect(toNodeGroupedFlowNodes([web, mgr], null).some((n) => n.id === CONTROL_SUMMARY_ID)).toBe(false);
+    expect(toNodeGroupedFlowNodes([wrk], null).some((n) => n.id === CONTROL_SUMMARY_ID)).toBe(false);
   });
 
   it('draws one card per service on each node, with stable ids, sorted by stack then service', () => {

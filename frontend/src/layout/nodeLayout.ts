@@ -16,6 +16,7 @@ import type { NodeServiceCardData } from '../types';
  *   ┌ Managers ─────────────────────────┐   all managers on one row
  *   │ [box] [box] [box]                 │
  *   └───────────────────────────────────┘
+ *              [control · 2377 · ready/total]   centered in the gap below
  *   ┌ Workers ──────────────────────────┐   workers wrap every 5 boxes
  *   │ [box] [box] ... [box]  (5 max)    │
  *   │ [box] [box]                       │
@@ -26,7 +27,9 @@ import type { NodeServiceCardData } from '../types';
  * Every swarm node box has the same width; boxes in a row share their top
  * edge and are stretched to the row's tallest box. Service cards (and local
  * standalone containers) stack vertically at the full inner width of a box.
- * Sections are left-aligned and stacked with SECTION_GAP between them.
+ * Sections are left-aligned and stacked with SECTION_GAP between them. The
+ * control-plane summary pill (see utils/nodeTransform.ts) floats centered in
+ * the Managers→Workers gap rather than claiming a section of its own.
  */
 
 /** Width of every swarm node box. */
@@ -126,6 +129,8 @@ export function layoutNodeGroups(nodes: RFNode[]): RFNode[] {
   };
 
   let cursorY = 0;
+  let managerBottom: number | undefined;
+  let maxRoleWidth = 0;
   const roleGroups = nodes.filter((n) => n.type === 'roleGroup');
   for (const group of roleGroups) {
     const boxes = childrenOf.get(group.id) ?? [];
@@ -137,7 +142,17 @@ export function layoutNodeGroups(nodes: RFNode[]): RFNode[] {
       height: ROLE_GROUP_PADDING_TOP + grid.height + ROLE_GROUP_PADDING_BOTTOM,
     };
     place(group, 0, cursorY, size);
+    maxRoleWidth = Math.max(maxRoleWidth, size.width);
+    if (manager) managerBottom = cursorY + size.height;
     cursorY += size.height + SECTION_GAP;
+  }
+
+  // Control-plane summary pill: centered in the gap between the Managers and
+  // Workers groups, rather than carving out space of its own. The node
+  // renders itself centered on this anchor (translate(-50%, -50%)).
+  const summary = nodes.find((n) => n.type === 'controlSummary');
+  if (summary && managerBottom !== undefined) {
+    place(summary, maxRoleWidth / 2, managerBottom + SECTION_GAP / 2);
   }
 
   // Free-standing boxes (Unassigned) in their own row below the role groups.

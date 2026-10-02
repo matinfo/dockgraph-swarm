@@ -13,7 +13,7 @@ import {
   ROLE_GROUP_PADDING_TOP,
   SECTION_GAP,
 } from './nodeLayout';
-import { toNodeGroupedFlowNodes, UNASSIGNED_NODE_GROUP_ID } from '../utils/nodeTransform';
+import { toNodeGroupedFlowNodes, UNASSIGNED_NODE_GROUP_ID, CONTROL_SUMMARY_ID } from '../utils/nodeTransform';
 import { NODE_BOX_HEADER_HEIGHT, NODE_BOX_MIN_HEIGHT } from '../utils/constants';
 import type { DGNode, TaskInfo } from '../types';
 
@@ -97,6 +97,18 @@ describe('layoutNodeGroups', () => {
     expect(size(byId(nodes, 'swarmnode:m1')).h).toBe(
       NODE_BOX_HEADER_HEIGHT + serviceCardHeight(2) + CARD_GAP + serviceCardHeight(1) + NODE_BOX_PADDING,
     );
+  });
+
+  it('centers the control summary pill in the gap between Managers and Workers', () => {
+    const mg = byId(laid, 'rolegroup:manager');
+    const wg = byId(laid, 'rolegroup:worker');
+    const summary = byId(laid, CONTROL_SUMMARY_ID);
+    expect(summary.position).toEqual({
+      x: Math.max(size(mg).w, size(wg).w) / 2,
+      y: size(mg).h + SECTION_GAP / 2,
+    });
+    // No width/height style forced on it — it sizes itself.
+    expect(summary.style?.width).toBeUndefined();
   });
 
   it('places the Unassigned box free-standing below the workers', () => {

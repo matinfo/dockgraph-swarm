@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { Node as RFNode } from '@xyflow/react';
 import {
-  controlLinkEdge,
+  controlLinkEdges,
+  controlLinkId,
   overlayLinkEdges,
-  CONTROL_LINK_ID,
   MAX_OVERLAY_LINKS,
   type ControlLinkData,
   type OverlayLinkData,
@@ -31,29 +31,30 @@ function service(name: string, hosts: string[], networkId?: string): DGNode {
 const front: DGNode = { id: 'network:wp_front', type: 'network', name: 'wp_front', stack: 'wp' };
 const back: DGNode = { id: 'network:wp_back', type: 'network', name: 'wp_back', stack: 'wp' };
 
-describe('controlLinkEdge', () => {
-  it('is null without workers or without managers', () => {
-    expect(controlLinkEdge([swarmNode('m1', 'manager')])).toBeNull();
-    expect(controlLinkEdge([swarmNode('w1', 'worker')])).toBeNull();
+describe('controlLinkEdges', () => {
+  it('is empty without workers or without managers', () => {
+    expect(controlLinkEdges([swarmNode('m1', 'manager')])).toEqual([]);
+    expect(controlLinkEdges([swarmNode('w1', 'worker')])).toEqual([]);
   });
 
-  it('joins the Managers group to the Workers group and animates when healthy', () => {
-    const edge = controlLinkEdge([swarmNode('m1', 'manager'), swarmNode('w1', 'worker'), swarmNode('w2', 'worker')])!;
-    expect(edge.id).toBe(CONTROL_LINK_ID);
-    expect(edge.source).toBe(roleGroupId('manager'));
-    expect(edge.target).toBe(roleGroupId('worker'));
-    expect(edge.animated).toBe(true);
-    expect(edge.data as unknown as ControlLinkData).toEqual({ kind: 'control', ready: 2, total: 2, healthy: true });
+  it('draws one spoke per worker from the Managers group, healthy when ready', () => {
+    const edges = controlLinkEdges([swarmNode('m1', 'manager'), swarmNode('w1', 'worker'), swarmNode('w2', 'worker')]);
+    expect(edges.map((e) => e.id)).toEqual([controlLinkId('swarmnode:w1'), controlLinkId('swarmnode:w2')]);
+    expect(edges.every((e) => e.source === roleGroupId('manager'))).toBe(true);
+    expect(edges.map((e) => e.target)).toEqual(['swarmnode:w1', 'swarmnode:w2']);
+    expect(edges.map((e) => e.data as unknown as ControlLinkData)).toEqual([
+      { kind: 'control', healthy: true },
+      { kind: 'control', healthy: true },
+    ]);
   });
 
-  it('counts down workers, but not drained ones', () => {
-    const edge = controlLinkEdge([
+  it('flags a down worker on its own spoke, but not a drained one', () => {
+    const edges = controlLinkEdges([
       swarmNode('m1', 'manager'),
       swarmNode('w1', 'worker', 'down'),
       swarmNode('w2', 'worker', 'ready', 'drain'),
-    ])!;
-    expect(edge.animated).toBe(false);
-    expect(edge.data as unknown as ControlLinkData).toEqual({ kind: 'control', ready: 1, total: 2, healthy: false });
+    ]);
+    expect(edges.map((e) => (e.data as unknown as ControlLinkData).healthy)).toEqual([false, true]);
   });
 });
 

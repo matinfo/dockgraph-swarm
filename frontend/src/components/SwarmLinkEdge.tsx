@@ -10,6 +10,7 @@ import {
 } from '@xyflow/react';
 import { STATUS_COLORS, networkColor } from '../utils/colors';
 import { SWARM_CONTROL_PORT, type SwarmLinkData } from '../utils/swarmLinks';
+import { ARROW_LENGTH, ARROW_WIDTH, DOT_OPACITY, DOT_SPEED, MIN_ANIMATION_DURATION } from '../utils/constants';
 import { useTheme } from '../theme';
 
 // Floating-edge geometry, adapted from the React Flow "Simple Floating Edges"
@@ -57,9 +58,9 @@ function sideOf(r: Rect, p: { x: number; y: number }): Position {
 }
 
 /**
- * Link of the per-node view (see utils/swarmLinks.ts): the Managers → Workers
- * control-plane link, labelled with worker health, or an overlay link between
- * two service cards on different nodes that share a network.
+ * Link of the per-node view (see utils/swarmLinks.ts): one manager→worker
+ * control-plane spoke, or an overlay link between two service cards on
+ * different nodes that share a network.
  */
 export const SwarmLinkEdge = memo(function SwarmLinkEdge({ id, source, target, data, style }: EdgeProps) {
   const { theme } = useTheme();
@@ -92,11 +93,14 @@ export const SwarmLinkEdge = memo(function SwarmLinkEdge({ id, source, target, d
     );
   }
 
-  const color = link.healthy ? theme.edgeStroke : STATUS_COLORS.exited;
-  const down = link.total - link.ready;
-  const label = link.healthy
-    ? `control · ${SWARM_CONTROL_PORT} · ${link.ready}/${link.total} ready`
-    : `control · ${down}/${link.total} worker${link.total === 1 ? '' : 's'} down`;
+  // Healthy spokes get the "signal" accent plus a traveling arrow (manager →
+  // worker) instead of React Flow's generic dash animation, so the control
+  // plane reads as its own live flow rather than a dependency edge. A down
+  // worker stays a static dashed red line, labelled on its own spoke so the
+  // specific worker stands out instead of only an aggregate count.
+  const color = link.healthy ? theme.edgeSignal : STATUS_COLORS.exited;
+  const dist = Math.hypot(tp.x - sp.x, tp.y - sp.y);
+  const duration = Math.max(MIN_ANIMATION_DURATION, dist / DOT_SPEED);
 
   return (
     <>
@@ -106,35 +110,46 @@ export const SwarmLinkEdge = memo(function SwarmLinkEdge({ id, source, target, d
         style={{
           stroke: color,
           strokeWidth: 1.5,
-          // Healthy links animate through React Flow's `animated` edge class;
-          // an unhealthy link is a static dash.
           strokeDasharray: link.healthy ? undefined : '6 4',
           opacity,
         }}
       />
-      <EdgeLabelRenderer>
-        <div
-          data-testid="swarm-control-label"
-          className="nodrag nopan"
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            padding: '2px 8px',
-            background: theme.canvasBg,
-            border: `1px solid ${color}`,
-            borderRadius: 6,
-            fontFamily: 'var(--dg-font-mono)',
-            fontSize: 10,
-            lineHeight: 1.5,
-            color: link.healthy ? theme.nodeSubtext : color,
-            whiteSpace: 'nowrap',
-            opacity,
-            pointerEvents: 'none',
-          }}
+      {link.healthy && (
+        <path
+          // Triangle tip points along +x; animateMotion's rotate="auto" then
+          // rotates it to the spoke's tangent (manager → worker direction).
+          d={`M ${ARROW_LENGTH / 2} 0 L ${-ARROW_LENGTH / 2} ${ARROW_WIDTH} L ${-ARROW_LENGTH / 2} ${-ARROW_WIDTH} Z`}
+          fill={color}
+          opacity={opacity * DOT_OPACITY}
         >
-          {label}
-        </div>
-      </EdgeLabelRenderer>
+          <animateMotion dur={`${duration}s`} repeatCount="indefinite" path={path} rotate="auto" />
+        </path>
+      )}
+      {!link.healthy && (
+        <EdgeLabelRenderer>
+          <div
+            data-testid="swarm-control-label"
+            className="nodrag nopan"
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              padding: '2px 8px',
+              background: theme.canvasBg,
+              border: `1px solid ${color}`,
+              borderRadius: 6,
+              fontFamily: 'var(--dg-font-mono)',
+              fontSize: 10,
+              lineHeight: 1.5,
+              color,
+              whiteSpace: 'nowrap',
+              opacity,
+              pointerEvents: 'none',
+            }}
+          >
+            {`control · ${SWARM_CONTROL_PORT} · down`}
+          </div>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 });

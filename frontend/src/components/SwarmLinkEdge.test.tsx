@@ -26,21 +26,25 @@ function renderEdge(data: SwarmLinkData, target = 'b') {
 describe('SwarmLinkEdge', () => {
   afterEach(cleanup);
 
-  it('labels a healthy control link with the port and ready count', () => {
-    const { container } = renderEdge({ kind: 'control', ready: 2, total: 2, healthy: true });
-    expect(screen.getByTestId('swarm-control-label').textContent).toBe('control · 2377 · 2/2 ready');
+  it('draws a healthy control spoke with a traveling arrow and no text label', () => {
+    const { container } = renderEdge({ kind: 'control', healthy: true });
+    expect(screen.queryByTestId('swarm-control-label')).toBeNull();
+    // The arrowhead marker rides the path via animateMotion.
+    expect(container.querySelector('animateMotion')).not.toBeNull();
     const d = container.querySelector('path')!.getAttribute('d')!;
     // Leaves a's bottom border (y=100) and enters b's top border (y=300).
     expect(d.startsWith('M100,100')).toBe(true);
     expect(d.endsWith('100,300')).toBe(true);
   });
 
-  it('turns red and counts down workers when unhealthy', () => {
-    const { container } = renderEdge({ kind: 'control', ready: 1, total: 2, healthy: false });
-    expect(screen.getByTestId('swarm-control-label').textContent).toBe('control · 1/2 workers down');
+  it('turns red, dashes, and labels the spoke "down" when unhealthy', () => {
+    const { container } = renderEdge({ kind: 'control', healthy: false });
+    expect(screen.getByTestId('swarm-control-label').textContent).toBe('control · 2377 · down');
     const path = container.querySelector('path') as SVGPathElement;
     expect(path.style.stroke).toBe('rgb(239, 68, 68)'); // STATUS_COLORS.exited
     expect(path.style.strokeDasharray).toBe('6 4');
+    // No arrow marker on a down spoke.
+    expect(container.querySelector('animateMotion')).toBeNull();
   });
 
   it('draws an overlay link with its networks as tooltip', () => {
@@ -51,7 +55,7 @@ describe('SwarmLinkEdge', () => {
   });
 
   it('renders nothing while an end node is unknown', () => {
-    const { container } = renderEdge({ kind: 'control', ready: 1, total: 1, healthy: true }, 'missing');
+    const { container } = renderEdge({ kind: 'control', healthy: true }, 'missing');
     expect(container.querySelector('path')).toBeNull();
   });
 });

@@ -154,6 +154,18 @@ export interface RoleGroupData {
   taskCount: number;
 }
 
+/**
+ * Standalone summary pill of the per-node graph view, centered in the gap
+ * between the Managers and Workers groups. The control link fans out to one
+ * spoke per worker (see utils/swarmLinks.ts), so this carries the aggregate
+ * "control · port · ready/total" reading that used to live on a single edge.
+ */
+export interface ControlSummaryData {
+  ready: number;
+  total: number;
+  healthy: boolean;
+}
+
 /** A swarm node box in the per-node graph view. */
 export interface SwarmNodeGroupData {
   /** The swarmnode graph node, or a synthetic one for the Unassigned group. */
