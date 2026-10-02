@@ -161,13 +161,22 @@ export function DetailPanelService({ detail, statsMap, active, onNavigate }: Pro
         <Section title="Networks">
           {detail.networks.map((n) => (
             <div key={n.name} style={{ fontSize: 11, color: theme.panelText, marginBottom: 3 }}>
-              <span
-                style={{ fontFamily: 'var(--dg-font-mono)', ...navLinkStyle(theme.panelBorder) }}
+              <button
+                type="button"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                  color: 'inherit',
+                  fontFamily: 'var(--dg-font-mono)',
+                  ...navLinkStyle(theme.panelBorder),
+                }}
                 title={`Inspect network ${n.name}`}
                 onClick={() => onNavigate(`network:${n.name}`)}
               >
                 {n.name}
-              </span>
+              </button>
               {n.aliases && n.aliases.length > 0 && (
                 <span style={{ color: theme.nodeSubtext }}> ({n.aliases.join(', ')})</span>
               )}

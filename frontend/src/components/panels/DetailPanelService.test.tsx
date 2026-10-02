@@ -102,7 +102,8 @@ describe('DetailPanelService', () => {
 
   it('navigates to networks and volumes', () => {
     const onNavigate = renderPanel();
-    fireEvent.click(screen.getByText('shop_front'));
+    // A real button, so keyboard users can focus and activate it.
+    fireEvent.click(screen.getByRole('button', { name: 'shop_front' }));
     expect(onNavigate).toHaveBeenCalledWith('network:shop_front');
     fireEvent.click(screen.getByText('shop_data'));
     expect(onNavigate).toHaveBeenCalledWith('volume:shop_data');
