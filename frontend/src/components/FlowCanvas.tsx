@@ -618,6 +618,7 @@ export function FlowCanvas({
       ) : activeView === "logs" ? (
         <Suspense fallback={<ViewFallback />}>
           <CommonLogs
+            key={selectedStack ?? ''}
             active={activeView === "logs"}
             onOpenContainer={openContainerInfo}
             stack={selectedStack}
