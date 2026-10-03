@@ -176,7 +176,7 @@ describe('taskContainerName', () => {
   });
 });
 
-import { consumerStats, isNodeStatsKey, nodeStatsKey, seriesLabel, serviceOfTask, withoutNodeStats } from './stack';
+import { consumerStats, isNodeStatsKey, nodeStatsKey, seriesLabel, serviceOfTask, withoutCoveredTasks, withoutNodeStats } from './stack';
 import type { ContainerStatsData } from '../types/stats';
 
 describe('swarm node helpers', () => {
@@ -238,6 +238,16 @@ describe('consumerStats', () => {
       [`shop.api.1.${id}`, s], // its task: covered by the aggregate
     ]);
     expect([...consumerStats(m).keys()]).toEqual(['shop_web', `orphan_svc.1.${id}`, 'shop_web.backup', 'db', 'shop.api']);
+  });
+
+  it('drops history series covered by their service aggregate', () => {
+    const series = {
+      shop_web: 1,
+      [`shop_web.1.${id}`]: 2,
+      [`shop_agent.${node}.${id}`]: 3, // global task without an aggregate: kept
+      'shop_web.backup': 4,
+    };
+    expect(withoutCoveredTasks(series)).toEqual({ shop_web: 1, [`shop_agent.${node}.${id}`]: 3, 'shop_web.backup': 4 });
   });
 });
 

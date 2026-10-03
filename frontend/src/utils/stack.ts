@@ -82,20 +82,38 @@ export function serviceOfTask(name: string): string | undefined {
 }
 
 /**
+ * True for a swarm task series whose service aggregate is also present
+ * (`has(service)`): the aggregate already sums it, so showing both counts the
+ * service twice. Tasks of a service without an aggregate are not covered, so
+ * their usage is never lost.
+ */
+export function isCoveredTask(key: string, has: (key: string) => boolean): boolean {
+  const svc = serviceOfTask(key);
+  return svc !== undefined && has(svc);
+}
+
+/**
  * Workload entries of the live stats map, each counted once: drops per-node
- * aggregates, and swarm task series whose service aggregate is present (the
- * aggregate already sums them). Tasks of a service without an aggregate are
- * kept, so their usage is never lost.
+ * aggregates, and swarm task series covered by their service aggregate (see
+ * isCoveredTask).
  */
 export function consumerStats(stats: Map<string, ContainerStatsData>): Map<string, ContainerStatsData> {
   const out = new Map<string, ContainerStatsData>();
   for (const [key, value] of stats) {
-    if (isNodeStatsKey(key)) continue;
-    const svc = serviceOfTask(key);
-    if (svc !== undefined && stats.has(svc)) continue;
+    if (isNodeStatsKey(key) || isCoveredTask(key, (k) => stats.has(k))) continue;
     out.set(key, value);
   }
   return out;
+}
+
+/**
+ * History series keyed by workload, each workload once: drops the swarm task
+ * series covered by their service aggregate (see isCoveredTask), as
+ * consumerStats does for live stats.
+ */
+export function withoutCoveredTasks<T>(series: Record<string, T>): Record<string, T> {
+  const has = (key: string) => Object.hasOwn(series, key);
+  return Object.fromEntries(Object.entries(series).filter(([key]) => !isCoveredTask(key, has)));
 }
 
 /** Returns the stats map without the per-node aggregates (workload entries only). */
