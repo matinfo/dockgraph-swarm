@@ -195,6 +195,21 @@ describe('per-node view (nested groups and service cards)', () => {
     expect(r.highlightedGroupIds.has('rolegroup:worker')).toBe(false);
   });
 
+  it('lights the remote role group of a control link leaving the selected group', () => {
+    const control = makeEdge('control:w1', 'rolegroup:manager', 'swarmnode:w1');
+    const r = resolveConnectedElements({ type: 'node', id: 'rolegroup:manager' }, nodes, [control]);
+    expect(r.connectedEdgeIds.has('control:w1')).toBe(true);
+    expect(r.connectedNodeIds.has('swarmnode:w1')).toBe(true);
+    expect(r.highlightedGroupIds.has('rolegroup:worker')).toBe(true);
+  });
+
+  it('lights every ancestor group of a remote endpoint nested in a box', () => {
+    const link = makeEdge('overlay', 'nodesvc:m1:web', 'nodesvc:w1:web');
+    const r = resolveConnectedElements({ type: 'node', id: 'rolegroup:manager' }, nodes, [link]);
+    expect(r.highlightedGroupIds.has('swarmnode:w1')).toBe(true);
+    expect(r.highlightedGroupIds.has('rolegroup:worker')).toBe(true);
+  });
+
   it('keeps service cards lit when a search matches their service', () => {
     const matching = new Set(['service:web']);
     expect(matchesSearch(nodes[4], matching)).toBe(true);

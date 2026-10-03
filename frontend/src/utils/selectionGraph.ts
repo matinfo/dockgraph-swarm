@@ -88,15 +88,21 @@ export function resolveConnectedElements(
         connectedNodeIds.add(id);
         if (isGroupType(nodeById.get(id)?.type)) highlightedGroupIds.add(id);
       }
+      // The selected group itself counts as inside: control links leave the
+      // Managers role group directly, not one of its children.
+      const inside = (id: string) => id === selection.id || childIds.has(id);
       for (const e of edges) {
-        if (childIds.has(e.source) || childIds.has(e.target) ||
-            e.source === selection.id || e.target === selection.id) {
+        if (inside(e.source) || inside(e.target)) {
           connectedEdgeIds.add(e.id);
           connectedNodeIds.add(e.source);
           connectedNodeIds.add(e.target);
-          const remoteId = childIds.has(e.source) ? e.target : e.source;
-          const remoteNode = nodeById.get(remoteId);
-          if (remoteNode?.parentId) highlightedGroupIds.add(remoteNode.parentId);
+          // Light every group above the remote endpoint (node box → role group).
+          const remoteId = inside(e.source) ? e.target : e.source;
+          let parentId = nodeById.get(remoteId)?.parentId;
+          while (parentId && !highlightedGroupIds.has(parentId)) {
+            highlightedGroupIds.add(parentId);
+            parentId = nodeById.get(parentId)?.parentId;
+          }
         }
       }
     } else {
