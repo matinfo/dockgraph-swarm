@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/dockgraph/dockgraph/collector"
 )
 
@@ -98,8 +99,8 @@ func (p *AgentProxy) transport() http.RoundTripper {
 // (e.g. "/logs") under /agent/v1/containers/{id} when the container runs on
 // another node, and otherwise serves it locally. A container the locator
 // already knows is proxied without a Docker call; any other is served
-// locally when the local daemon knows it, before the locator searches
-// further. stream disables the overall request deadline and the server
+// locally unless the local daemon reports it not found, and only then does
+// the locator search further. stream disables the overall request deadline and the server
 // write deadline for long-lived responses.
 func (p *AgentProxy) wrap(local http.HandlerFunc, inspector ContainerInspector, suffix string, stream bool) http.HandlerFunc {
 	if p == nil || p.Locator == nil {
@@ -118,7 +119,12 @@ func (p *AgentProxy) wrap(local http.HandlerFunc, inspector ContainerInspector, 
 			probeCtx, cancel := context.WithTimeout(r.Context(), localProbeTimeout)
 			_, err := inspector.ContainerInspect(probeCtx, id)
 			cancel()
-			if err == nil {
+			// Only a container the local daemon doesn't have is looked up on
+			// other nodes. Any other error (a timeout, a struggling daemon)
+			// says nothing about where it runs, and searching then could
+			// proxy to a same-named container elsewhere: the local handler
+			// reports the error instead.
+			if !cerrdefs.IsNotFound(err) {
 				local(w, r)
 				return
 			}

@@ -17,6 +17,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	networktypes "github.com/docker/docker/api/types/network"
@@ -372,8 +373,8 @@ type stubDockerAPI struct {
 	// Swarm's own task counts, returned by ServiceList with Status set.
 	serviceStatus map[string]*swarm.ServiceStatus
 	// Failure injection for the list calls.
-	taskErr, nodeErr, serviceListErr error
-	serviceListCalls                 int
+	taskErr, nodeErr, serviceListErr, serviceInspectErr error
+	serviceListCalls                                    int
 }
 
 func (s *stubDockerAPI) findService(id string) (swarm.Service, bool) {
@@ -386,10 +387,13 @@ func (s *stubDockerAPI) findService(id string) (swarm.Service, bool) {
 }
 
 func (s *stubDockerAPI) ServiceInspectWithRaw(_ context.Context, id string, _ swarm.ServiceInspectOptions) (swarm.Service, []byte, error) {
+	if s.serviceInspectErr != nil {
+		return swarm.Service{}, nil, s.serviceInspectErr
+	}
 	if svc, ok := s.findService(id); ok {
 		return svc, nil, nil
 	}
-	return swarm.Service{}, nil, fmt.Errorf("service %s not found", id)
+	return swarm.Service{}, nil, cerrdefs.ErrNotFound.WithMessage("service " + id + " not found")
 }
 
 func (s *stubDockerAPI) ServiceList(_ context.Context, opts swarm.ServiceListOptions) ([]swarm.Service, error) {
@@ -441,7 +445,7 @@ func (s *stubDockerAPI) ContainerLogs(ctx context.Context, containerID string, o
 }
 
 func (s *stubDockerAPI) ContainerInspect(_ context.Context, _ string) (containertypes.InspectResponse, error) {
-	return containertypes.InspectResponse{}, fmt.Errorf("not implemented")
+	return containertypes.InspectResponse{}, errNotFoundStub
 }
 
 func (s *stubDockerAPI) VolumeInspect(_ context.Context, _ string) (volumetypes.Volume, error) {

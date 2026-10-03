@@ -261,6 +261,19 @@ func TestAgentProxyLocalAndUnknownServedLocally(t *testing.T) {
 		t.Errorf("unknown: status %d, locator calls %d", rec.Code, locator.calls)
 	}
 
+	// A local daemon error other than not-found says nothing about where
+	// the container runs: the local handler reports it, and the locator,
+	// which could find a same-named container elsewhere, isn't consulted.
+	locator.urls["web"] = "http://127.0.0.1:1"
+	flaky := &stubContainerInspector{err: context.DeadlineExceeded}
+	mux = http.NewServeMux()
+	mux.HandleFunc("GET /api/containers/{id}", proxy.wrap(HandleContainerInspect(flaky), flaky, "", false))
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/containers/web", nil))
+	if locator.calls != 1 {
+		t.Errorf("transient local error: locator calls %d, want 1 (unchanged)", locator.calls)
+	}
+
 	// Invalid IDs never reach the locator.
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/containers/-bad", nil))
@@ -335,3 +348,6 @@ var errNotFoundStub = &notFoundErr{}
 type notFoundErr struct{}
 
 func (*notFoundErr) Error() string { return "No such container" }
+
+// NotFound marks the error as Docker's not-found (errdefs.IsNotFound).
+func (*notFoundErr) NotFound() {}
