@@ -237,6 +237,49 @@ func TestAgentPoolLocateContainer(t *testing.T) {
 	}
 }
 
+// Standalone container names are only unique per node: a name sampled on
+// several nodes must not be routed to whichever node reported last.
+func TestAgentPoolLocateContainerSameNameOnTwoNodes(t *testing.T) {
+	a := newFakeAgent(t, "node-a",
+		ContainerSample{ID: "aaaaaaaaaaaaaaaa", Name: "redis"},
+		ContainerSample{ID: "a1a1a1a1a1a1a1a1", Name: "redis-cache-primary"})
+	b := newFakeAgent(t, "node-b",
+		ContainerSample{ID: "bbbbbbbbbbbbbbbb", Name: "redis"},
+		ContainerSample{ID: "b1b1b1b1b1b1b1b1", Name: "worker"})
+	tasks := &stubDockerClient{}
+	p := newTestPool(&stubResolver{addrs: []string{a.addr(), b.addr()}}, "node-local", tasks)
+	p.Refresh(context.Background())
+
+	urlA, urlB := "http://"+a.addr(), "http://"+b.addr()
+	cases := []struct {
+		id   string
+		want string // "" when not located
+	}{
+		{"redis", ""},              // same name on both nodes: ambiguous
+		{"aaaaaaaaaaaaaaaa", urlA}, // IDs stay exact
+		{"bbbbbbbbbbbbbbbb", urlB},
+		{"bbbbbbbbbbbb", urlB}, // ID prefix
+		{"worker", urlB},       // name on a single node
+		{"redis-cache-primary", urlA},
+		{"redis-cache-", ""}, // prefixes match IDs, never names
+	}
+	// Agents answer in random order; every poll must give the same answer.
+	for round := range 5 {
+		p.Samples(context.Background())
+		for _, c := range cases {
+			got, ok := p.LocateContainer(context.Background(), c.id)
+			if ok != (c.want != "") || got != c.want {
+				t.Fatalf("round %d: LocateContainer(%q) = %q,%v want %q", round, c.id, got, ok, c.want)
+			}
+		}
+	}
+	tasks.mu.Lock()
+	defer tasks.mu.Unlock()
+	if tasks.taskListCalls != 5 {
+		t.Errorf("task list calls %d, want 5 (only the unmatched prefix falls back to it)", tasks.taskListCalls)
+	}
+}
+
 func TestAgentPoolStartStop(t *testing.T) {
 	a := newFakeAgent(t, "node-1")
 	res := &stubResolver{addrs: []string{a.addr()}}

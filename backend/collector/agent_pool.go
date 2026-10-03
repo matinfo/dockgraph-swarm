@@ -98,9 +98,13 @@ type AgentPool struct {
 
 	mu     sync.RWMutex
 	agents map[string]agentEndpoint // nodeID → agent
-	// owners maps container IDs, names and task IDs seen in the last remote
-	// stats poll to the node that reported them.
+	// owners maps the container IDs and task IDs seen in the last remote
+	// stats poll, unique cluster-wide, to the node that reported them.
 	owners map[string]string
+	// names maps the container names seen in the last remote stats poll to
+	// the node that reported them, or to "" when several nodes did: names
+	// of standalone containers are only unique per node.
+	names map[string]string
 	// reporting lists the hostnames of agents that answered the last remote
 	// stats poll, even with no samples (e.g. only the agent runs there).
 	reporting []string
@@ -131,6 +135,7 @@ func NewAgentPool(cfg AgentPoolConfig) *AgentPool {
 		cfg:       cfg,
 		agents:    make(map[string]agentEndpoint),
 		owners:    make(map[string]string),
+		names:     make(map[string]string),
 		lastCount: -1,
 		retryMin:  agentRetryInitial,
 	}
@@ -301,6 +306,7 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	if len(agents) == 0 {
 		p.mu.Lock()
 		p.owners = make(map[string]string)
+		p.names = make(map[string]string)
 		p.reporting = nil
 		p.mu.Unlock()
 		return nil
@@ -311,6 +317,7 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 		wg        sync.WaitGroup
 		samples   []ContainerSample
 		owners    = make(map[string]string)
+		names     = make(map[string]string)
 		reporting []string
 	)
 	for nodeID, a := range agents {
@@ -337,7 +344,11 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 				s.NodeHostname = a.hostname
 				samples = append(samples, s)
 				owners[s.ID] = nodeID
-				owners[s.Name] = nodeID
+				if owner, seen := names[s.Name]; seen && owner != nodeID {
+					names[s.Name] = "" // same name on several nodes
+				} else {
+					names[s.Name] = nodeID
+				}
 				if tid := s.TaskID(); tid != "" {
 					owners[tid] = nodeID
 				}
@@ -349,6 +360,7 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	sort.Strings(reporting)
 	p.mu.Lock()
 	p.owners = owners
+	p.names = names
 	p.reporting = reporting
 	p.mu.Unlock()
 	return samples
@@ -364,10 +376,11 @@ func (p *AgentPool) ReportingNodes() []string {
 
 // LocateContainer returns the base URL (http://host:port) of the agent on
 // the node running container id (an ID, ID prefix, name or task ID), when
-// that node is not the local one and has a known agent.
+// that node is not the local one and has a known agent. A name or ID prefix
+// matching containers on several nodes is not located.
 func (p *AgentPool) LocateContainer(ctx context.Context, id string) (string, bool) {
-	nodeID := p.ownerFromSamples(id)
-	if nodeID == "" {
+	nodeID, found := p.ownerFromSamples(id)
+	if !found {
 		nodeID = p.ownerFromTasks(ctx, id)
 	}
 	if nodeID == "" || nodeID == p.cfg.LocalNodeID {
@@ -382,21 +395,29 @@ func (p *AgentPool) LocateContainer(ctx context.Context, id string) (string, boo
 	return "http://" + a.addr, true
 }
 
-// ownerFromSamples looks id up in the last remote stats poll.
-func (p *AgentPool) ownerFromSamples(id string) string {
+// ownerFromSamples looks id up in the last remote stats poll. found is true
+// when id matched there; nodeID is then "" if it matched on several nodes.
+func (p *AgentPool) ownerFromSamples(id string) (nodeID string, found bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if nodeID, ok := p.owners[id]; ok {
-		return nodeID
+		return nodeID, true
+	}
+	if nodeID, ok := p.names[id]; ok {
+		return nodeID, true
 	}
 	if len(id) >= 12 {
-		for key, nodeID := range p.owners {
-			if strings.HasPrefix(key, id) {
-				return nodeID
+		for key, owner := range p.owners {
+			if !strings.HasPrefix(key, id) {
+				continue
 			}
+			if found && owner != nodeID {
+				return "", true // ambiguous prefix
+			}
+			nodeID, found = owner, true
 		}
 	}
-	return ""
+	return nodeID, found
 }
 
 // ownerFromTasks finds the task running container id through the swarm
