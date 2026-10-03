@@ -635,3 +635,37 @@ func TestHandleSystemInfoSwarm(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleServiceInspectJobDesiredCount(t *testing.T) {
+	t.Run("reads a job's desired count from swarm's counts", func(t *testing.T) {
+		stub := swarmStub()
+		stub.services[2].Spec.Mode = swarm.ServiceMode{ReplicatedJob: &swarm.ReplicatedJob{}} // blog_app, one running task
+		stub.serviceStatus = map[string]*swarm.ServiceStatus{"svc-blog": {RunningTasks: 1, DesiredTasks: 1}}
+		status, replicas, unavailable := inspectReplicas(t, stub, "blog_app")
+		// Not 1/0 "stopped": inspect carries no desired count for jobs.
+		if status != "running" || replicas == nil || *replicas != (collector.ReplicaCount{Running: 1, Desired: 1}) || unavailable {
+			t.Errorf("status %q replicas %+v unavailable %v", status, replicas, unavailable)
+		}
+		if stub.serviceListCalls != 1 {
+			t.Errorf("service list called %d times, want 1", stub.serviceListCalls)
+		}
+	})
+
+	t.Run("unknown when swarm's counts are unavailable", func(t *testing.T) {
+		stub := swarmStub()
+		stub.services[2].Spec.Mode = swarm.ServiceMode{GlobalJob: &swarm.GlobalJob{}}
+		stub.serviceListErr = errors.New("swarm manager unavailable")
+		status, replicas, _ := inspectReplicas(t, stub, "blog_app")
+		if status != collector.ServiceStatusUnknown || replicas != nil {
+			t.Errorf("status %q replicas %+v", status, replicas)
+		}
+	})
+
+	t.Run("replicated services don't list services", func(t *testing.T) {
+		stub := swarmStub()
+		inspectReplicas(t, stub, "shop_web")
+		if stub.serviceListCalls != 0 {
+			t.Errorf("service list called %d times, want 0", stub.serviceListCalls)
+		}
+	})
+}
