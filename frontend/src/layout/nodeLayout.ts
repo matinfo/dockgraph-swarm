@@ -16,7 +16,7 @@ import type { NodeServiceCardData } from '../types';
  *   ┌ Managers ─────────────────────────┐   all managers on one row
  *   │ [box] [box] [box]                 │
  *   └───────────────────────────────────┘
- *              [control · 2377 · ready/total]   centered in the gap below
+ *            [TCP · 2377 · ready/total]   centered in the gap below
  *   ┌ Workers ──────────────────────────┐   workers wrap every 5 boxes
  *   │ [box] [box] ... [box]  (5 max)    │
  *   │ [box] [box]                       │
@@ -28,8 +28,8 @@ import type { NodeServiceCardData } from '../types';
  * edge and are stretched to the row's tallest box. Service cards (and local
  * standalone containers) stack vertically at the full inner width of a box.
  * Sections are left-aligned and stacked with SECTION_GAP between them. The
- * control-plane summary pill (see utils/nodeTransform.ts) floats centered in
- * the Managers→Workers gap rather than claiming a section of its own.
+ * control-plane summary badge (see utils/nodeTransform.ts) floats centered
+ * in the Managers→Workers gap rather than claiming a section of its own.
  */
 
 /** Width of every swarm node box. */
@@ -130,25 +130,31 @@ export function layoutNodeGroups(nodes: RFNode[]): RFNode[] {
 
   let cursorY = 0;
   let managerBottom: number | undefined;
-  let maxRoleWidth = 0;
-  const roleGroups = nodes.filter((n) => n.type === 'roleGroup');
-  for (const group of roleGroups) {
-    const boxes = childrenOf.get(group.id) ?? [];
-    const manager = (group.data as { role?: string }).role === 'manager';
-    const perRow = manager ? Math.max(1, boxes.length) : MAX_WORKERS_PER_ROW;
-    const grid = placeGrid(boxes, perRow, ROLE_GROUP_PADDING_X, ROLE_GROUP_PADDING_TOP);
-    const size = {
-      width: grid.width + 2 * ROLE_GROUP_PADDING_X,
-      height: ROLE_GROUP_PADDING_TOP + grid.height + ROLE_GROUP_PADDING_BOTTOM,
-    };
-    place(group, 0, cursorY, size);
-    maxRoleWidth = Math.max(maxRoleWidth, size.width);
+  // Boxes sit relative to their group, so size every role group first, then
+  // center the groups on a common vertical axis: the control badge between
+  // them then reads as centered under the Managers and over the Workers.
+  const roleGroups = nodes
+    .filter((n) => n.type === 'roleGroup')
+    .map((group) => {
+      const boxes = childrenOf.get(group.id) ?? [];
+      const manager = (group.data as { role?: string }).role === 'manager';
+      const perRow = manager ? Math.max(1, boxes.length) : MAX_WORKERS_PER_ROW;
+      const grid = placeGrid(boxes, perRow, ROLE_GROUP_PADDING_X, ROLE_GROUP_PADDING_TOP);
+      const size = {
+        width: grid.width + 2 * ROLE_GROUP_PADDING_X,
+        height: ROLE_GROUP_PADDING_TOP + grid.height + ROLE_GROUP_PADDING_BOTTOM,
+      };
+      return { group, manager, size };
+    });
+  const maxRoleWidth = Math.max(0, ...roleGroups.map((g) => g.size.width));
+  for (const { group, manager, size } of roleGroups) {
+    place(group, (maxRoleWidth - size.width) / 2, cursorY, size);
     if (manager) managerBottom = cursorY + size.height;
     cursorY += size.height + SECTION_GAP;
   }
 
-  // Control-plane summary pill: centered in the gap between the Managers and
-  // Workers groups, rather than carving out space of its own. The node
+  // Control-plane summary badge: centered in the gap between the Managers
+  // and Workers groups, rather than carving out space of its own. The node
   // renders itself centered on this anchor (translate(-50%, -50%)).
   const summary = nodes.find((n) => n.type === 'controlSummary');
   if (summary && managerBottom !== undefined) {

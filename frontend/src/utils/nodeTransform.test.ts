@@ -82,7 +82,7 @@ describe('toNodeGroupedFlowNodes', () => {
     expect(rf.filter((n) => n.type === 'roleGroup').map((n) => n.id)).toEqual(['rolegroup:manager']);
   });
 
-  it('adds a control summary pill when both a manager and a worker exist', () => {
+  it('adds a control summary badge when both a manager and a worker exist', () => {
     const rf = toNodeGroupedFlowNodes(all, 'n1');
     const summary = rf.find((n) => n.id === CONTROL_SUMMARY_ID)!;
     expect(summary.type).toBe('controlSummary');

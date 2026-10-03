@@ -2,9 +2,9 @@ import type { CSSProperties } from 'react';
 
 /**
  * Shared small rounded-rect badge look: SwarmNodeBadges' role/availability/
- * state chips and ControlSummary's port badge all use this. Kept in its own
- * module (rather than exported from a component file) so React Fast Refresh
- * stays happy — a component file may only export components.
+ * state chips and ControlSummary's protocol badge all use this. Kept in its
+ * own module (rather than exported from a component file) so React Fast
+ * Refresh stays happy — a component file may only export components.
  */
 export const chip: CSSProperties = {
   flexShrink: 0,

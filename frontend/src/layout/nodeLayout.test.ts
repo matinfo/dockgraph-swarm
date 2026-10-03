@@ -47,7 +47,9 @@ describe('layoutNodeGroups', () => {
 
   it('puts every manager on the top row and the Managers group first', () => {
     const mg = byId(laid, 'rolegroup:manager');
-    expect(mg.position).toEqual({ x: 0, y: 0 });
+    const wg = byId(laid, 'rolegroup:worker');
+    // Narrower than Workers, so centered over them.
+    expect(mg.position).toEqual({ x: (size(wg).w - size(mg).w) / 2, y: 0 });
     const ys = new Set(managers.map((m) => byId(laid, m.id).position.y));
     expect(ys).toEqual(new Set([ROLE_GROUP_PADDING_TOP]));
     expect(managers.map((m) => byId(laid, m.id).position.x)).toEqual([0, 1, 2].map(
@@ -59,7 +61,7 @@ describe('layoutNodeGroups', () => {
   it(`wraps workers every ${MAX_WORKERS_PER_ROW} boxes below the managers`, () => {
     const mg = byId(laid, 'rolegroup:manager');
     const wg = byId(laid, 'rolegroup:worker');
-    expect(wg.position.y).toBe(size(mg).h + SECTION_GAP);
+    expect(wg.position).toEqual({ x: 0, y: size(mg).h + SECTION_GAP });
 
     const pos = workers.map((w) => byId(laid, w.id).position);
     const rows = [...new Set(pos.map((p) => p.y))];
@@ -99,7 +101,7 @@ describe('layoutNodeGroups', () => {
     );
   });
 
-  it('centers the control summary pill in the gap between Managers and Workers', () => {
+  it('centers the control summary badge in the gap between Managers and Workers', () => {
     const mg = byId(laid, 'rolegroup:manager');
     const wg = byId(laid, 'rolegroup:worker');
     const summary = byId(laid, CONTROL_SUMMARY_ID);
@@ -107,6 +109,9 @@ describe('layoutNodeGroups', () => {
       x: Math.max(size(mg).w, size(wg).w) / 2,
       y: size(mg).h + SECTION_GAP / 2,
     });
+    // On the shared center axis of both groups.
+    expect(summary.position.x).toBe(mg.position.x + size(mg).w / 2);
+    expect(summary.position.x).toBe(wg.position.x + size(wg).w / 2);
     // No width/height style forced on it — it sizes itself.
     expect(summary.style?.width).toBeUndefined();
   });

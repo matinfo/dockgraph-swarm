@@ -2,7 +2,7 @@ import type { Node as RFNode } from '@xyflow/react';
 import { projectOf } from './stack';
 import type { DGNode, TaskInfo, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData, ControlSummaryData, SwarmRole } from '../types';
 
-/** Id of the control-plane summary pill between the Managers and Workers groups. */
+/** Id of the control-plane summary badge between the Managers and Workers groups. */
 export const CONTROL_SUMMARY_ID = 'controlsummary';
 
 /** Group id for tasks the scheduler hasn't placed on a node yet. */
@@ -240,7 +240,7 @@ export function toNodeGroupedFlowNodes(dgNodes: DGNode[], localNodeId?: string |
     group.data = data as unknown as Record<string, unknown>;
   }
 
-  // Control-plane summary pill, free-standing in the gap between the two
+  // Control-plane summary badge, free-standing in the gap between the two
   // groups (see layout/nodeLayout.ts for its position). Only when both a
   // manager and at least one worker exist, matching the old aggregate link.
   if (hasManagers && workers.length > 0) {
