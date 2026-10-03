@@ -15,7 +15,9 @@ interface KeyedState<T> extends FetchState<T> {
 const EMPTY: KeyedState<never> = { url: null, data: null, loading: false, error: null };
 
 /**
- * Polls `url` every `intervalMs`. Data from the last successful poll is kept
+ * Polls `url`, starting the next request `intervalMs` after the previous one
+ * settled, so requests never overlap and an older response can't overwrite
+ * a newer one. Data from the last successful poll is kept
  * while the next one loads and after it fails, but only for the same URL:
  * results are keyed by URL, so a change of URL (another stack, scope or
  * range) never renders the previous URL's data, even for the one render
@@ -47,6 +49,7 @@ export function usePollingFetch<T>(url: string | null, intervalMs: number): Fetc
     }
 
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const doFetch = () => {
       fetch(url, { signal: controller.signal })
@@ -65,6 +68,9 @@ export function usePollingFetch<T>(url: string | null, intervalMs: number): Fetc
             stateRef.current = { ...stateRef.current, loading: false, error: err.message };
             notify();
           }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) timer = setTimeout(doFetch, intervalMs);
         });
     };
 
@@ -74,10 +80,9 @@ export function usePollingFetch<T>(url: string | null, intervalMs: number): Fetc
     notify();
     doFetch();
 
-    const timer = setInterval(doFetch, intervalMs);
     return () => {
       controller.abort();
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [url, intervalMs, notify]);
 

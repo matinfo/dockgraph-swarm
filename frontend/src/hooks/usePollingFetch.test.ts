@@ -75,6 +75,28 @@ describe('usePollingFetch', () => {
     expect(result.current.data).toEqual({ v: 'a' });
   });
 
+  it('never starts a poll while the previous one is pending', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const pending: ((body: unknown) => void)[] = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      pending.push((body) => resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => usePollingFetch<{ v: number }>('/a', 1_000));
+
+    // A slow first request spans several intervals: no second one starts.
+    await vi.advanceTimersByTimeAsync(3_500);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    pending[0]({ v: 1 });
+    await waitFor(() => expect(result.current.data).toEqual({ v: 1 }));
+    // The next poll starts one interval after the previous one settled.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    pending[1]({ v: 2 });
+    await waitFor(() => expect(result.current.data).toEqual({ v: 2 }));
+  });
+
   it('shows data again when switching back to a URL', async () => {
     stubFetch({ '/a': { ok: true, body: { v: 'a' } }, '/b': { ok: true, body: { v: 'b' } } });
     const { result, rerender } = renderHook(({ url }) => usePollingFetch<{ v: string }>(url, 60_000), {
