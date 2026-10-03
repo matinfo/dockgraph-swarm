@@ -230,3 +230,17 @@ func TestContainerLogsSSE(t *testing.T) {
 		t.Errorf("unexpected history body %s", body)
 	}
 }
+
+func TestAuthChallenge(t *testing.T) {
+	_, ts := newTestServer(t, &stubDocker{})
+	url := ts.URL + collector.AgentAPIPrefix + "/info"
+	for _, tc := range []struct{ bearer, want string }{
+		{"", `Bearer realm="dockgraph-agent"`},
+		{"wrong", `Bearer realm="dockgraph-agent", error="invalid_token"`},
+	} {
+		resp := get(t, url, tc.bearer)
+		if got := resp.Header.Get("WWW-Authenticate"); got != tc.want {
+			t.Errorf("bearer %q: WWW-Authenticate %q, want %q", tc.bearer, got, tc.want)
+		}
+	}
+}

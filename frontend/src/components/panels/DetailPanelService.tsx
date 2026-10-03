@@ -1,7 +1,7 @@
 import { useTheme } from '../../theme';
 import { formatBytes } from '../../utils/formatBytes';
 import { STATUS_COLORS } from '../../utils/colors';
-import { Section, Row, navLinkStyle, monoStyle } from './shared';
+import { Section, Row, navLinkStyle, navButtonReset, monoStyle } from './shared';
 import { Copyable } from './Copyable';
 import { StatusBadge } from './StatusBadge';
 import { DetailPanelStats } from './DetailPanelStats';
@@ -163,15 +163,7 @@ export function DetailPanelService({ detail, statsMap, active, onNavigate }: Pro
             <div key={n.name} style={{ fontSize: 11, color: theme.panelText, marginBottom: 3 }}>
               <button
                 type="button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  font: 'inherit',
-                  color: 'inherit',
-                  fontFamily: 'var(--dg-font-mono)',
-                  ...navLinkStyle(theme.panelBorder),
-                }}
+                style={{ ...navButtonReset, fontFamily: 'var(--dg-font-mono)', ...navLinkStyle(theme.panelBorder) }}
                 title={`Inspect network ${n.name}`}
                 onClick={() => onNavigate(`network:${n.name}`)}
               >
