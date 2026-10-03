@@ -262,6 +262,12 @@ describe('showsSwarmWorkloads', () => {
 
   it('summarises containers in the standalone scope, even in swarm mode', () => {
     expect(showsSwarmWorkloads([lone], true, STANDALONE_STACK)).toBe(false);
+    expect(showsSwarmWorkloads([], true, STANDALONE_STACK)).toBe(false);
+  });
+
+  it('summarises the containers of a Compose project on a swarm-mode daemon', () => {
+    const api: DGNode = { id: 'container:blog-api-1', type: 'container', name: 'blog-api-1', status: 'exited', stack: 'blog' };
+    expect(showsSwarmWorkloads([api], true, 'blog')).toBe(false);
   });
 
   it('counts service nodes as swarm before the system info has loaded', () => {
