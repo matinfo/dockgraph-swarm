@@ -216,21 +216,30 @@ describe('placeTasks active-task filter', () => {
       mode: 'replicated-job',
       replicas: { running: 0, desired: 1 },
       tasks: [
-        { id: 'done', slot: 1, nodeHostname: 'mgr', state: 'complete', desiredState: 'complete' },
-        { id: 'gone', slot: 2, nodeHostname: 'mgr', state: 'complete', desiredState: 'remove' },
-        { id: 'failed', slot: 3, nodeHostname: 'mgr', state: 'failed', desiredState: 'shutdown' },
+        { id: 'run', slot: 1, nodeHostname: 'mgr', state: 'running', desiredState: 'complete' },
+        { id: 'done', slot: 2, nodeHostname: 'mgr', state: 'complete', desiredState: 'complete' },
+        { id: 'gone', slot: 3, nodeHostname: 'mgr', state: 'complete', desiredState: 'remove' },
+        { id: 'failed', slot: 4, nodeHostname: 'mgr', state: 'failed', desiredState: 'shutdown' },
       ],
     },
   };
 
-  it('keeps completed job tasks and drops shutdown and removed ones', () => {
+  it('keeps running job tasks and drops completed, shutdown and removed ones', () => {
     const ids = (placeTasks([mgr, job]).get('swarmnode:mgr') ?? []).map((p) => p.task.id);
-    expect(ids).toEqual(['done']);
+    expect(ids).toEqual(['run']);
   });
 
   it('matches the backend check for each desired state', () => {
     const t = (desiredState: string) => ({ id: 'x', desiredState });
     expect(['running', 'ready', 'complete', ''].map((s) => isActiveTask(t(s)))).toEqual([true, true, true, true]);
     expect(['shutdown', 'remove'].map((s) => isActiveTask(t(s)))).toEqual([false, false]);
+  });
+
+  it('treats a finished job task as history, whatever its desired state', () => {
+    const t = (state: string, desiredState: string) => ({ id: 'x', state, desiredState });
+    expect(isActiveTask(t('running', 'complete'))).toBe(true);
+    expect(isActiveTask(t('pending', 'complete'))).toBe(true);
+    expect(isActiveTask(t('complete', 'complete'))).toBe(false);
+    expect(isActiveTask(t('complete', 'running'))).toBe(false);
   });
 });
