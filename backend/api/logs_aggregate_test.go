@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/swarm"
@@ -348,5 +349,40 @@ func TestLogAggregatorForgetsEndedContainerFollower(t *testing.T) {
 			case <-time.After(5 * time.Millisecond):
 			}
 		}
+	}
+}
+
+func TestLogAggregatorStopsRetryingRemovedService(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	gone := func(context.Context, string, containertypes.LogsOptions) (io.ReadCloser, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		return nil, cerrdefs.ErrNotFound.WithMessage("service svc not found")
+	}
+	agg := newLogAggregator(mockLogger{}, "")
+	agg.retryDelay = time.Millisecond
+	agg.addSource(context.Background(), logSource{id: "svc", name: "shop_api", open: gone, service: true})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		agg.mu.Lock()
+		n := len(agg.followers)
+		agg.mu.Unlock()
+		if n == 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("follower of a removed service never stopped")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("opens = %d, want 1 (no retry once the service is gone)", calls)
 	}
 }

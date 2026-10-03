@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -270,15 +271,16 @@ func (a *logAggregator) forget(id string, f *follower) {
 // stream ends; a later start event can then follow it again. Services have no
 // start event to bring their logs back, so a service stream that fails to
 // open or ends (manager error, leader change, scaled to 0) is reopened with
-// backoff, resuming after the last line forwarded. Removal cancels the
-// context, which also ends any wait.
+// backoff, resuming after the last line forwarded. A service the manager no
+// longer knows is not retried. Removal cancels the context, which also ends
+// any wait.
 func (a *logAggregator) run(ctx context.Context, f *follower, src logSource) {
 	defer a.forget(src.id, f)
 	since := a.since
 	delay := a.retryDelay
 	for {
-		last := a.follow(ctx, src, since)
-		if ctx.Err() != nil || !src.service {
+		last, err := a.follow(ctx, src, since)
+		if ctx.Err() != nil || !src.service || cerrdefs.IsNotFound(err) {
 			return
 		}
 		if ts, err := time.Parse(time.RFC3339Nano, last); err == nil {
@@ -299,9 +301,10 @@ func (a *logAggregator) run(ctx context.Context, f *follower, src logSource) {
 
 // follow streams one source's logs from since (or only new lines), tagging
 // and forwarding each line, and returns the timestamp of the last line
-// forwarded. A read error (container gone, cancelled) ends the stream without
-// affecting others.
-func (a *logAggregator) follow(ctx context.Context, src logSource, since string) (last string) {
+// forwarded, along with the error that kept the stream from opening, if any.
+// A read error (container gone, cancelled) ends the stream without affecting
+// others.
+func (a *logAggregator) follow(ctx context.Context, src logSource, since string) (last string, openErr error) {
 	opts := containertypes.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
@@ -314,7 +317,7 @@ func (a *logAggregator) follow(ctx context.Context, src logSource, since string)
 	}
 	rc, err := src.open(ctx, src.id, opts)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	defer rc.Close()
 
@@ -322,7 +325,7 @@ func (a *logAggregator) follow(ctx context.Context, src logSource, since string)
 	for {
 		streamType, payload, err := dlr.next()
 		if err != nil {
-			return last
+			return last, nil
 		}
 		scanner := bufio.NewScanner(bytes.NewReader(payload))
 		for scanner.Scan() {
@@ -333,7 +336,7 @@ func (a *logAggregator) follow(ctx context.Context, src logSource, since string)
 					last = e.Timestamp
 				}
 			case <-ctx.Done():
-				return last
+				return last, nil
 			}
 		}
 	}
