@@ -279,6 +279,23 @@ func TestHandleServiceInspectErrors(t *testing.T) {
 	}
 }
 
+func TestHandleServiceInspectManagerErrorIsNotNotFound(t *testing.T) {
+	stub := swarmStub()
+	stub.serviceInspectErr = context.DeadlineExceeded
+	srv := newSwarmTestServer(stub, collector.ModeSwarm)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/services/shop_web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	// A manager timeout is not "the service is gone".
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status %d, want %d", resp.StatusCode, http.StatusBadGateway)
+	}
+}
+
 func TestServiceRoutesOnlyInSwarmMode(t *testing.T) {
 	srv := newSwarmTestServer(swarmStub(), collector.ModeStandalone)
 	defer srv.Close()
