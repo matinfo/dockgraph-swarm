@@ -197,7 +197,8 @@ func readLogLines(reader io.Reader, limit int) []logEntry {
 
 // serviceHistoryTailFactor widens the per-task tail requested for service log
 // history, since the service endpoint ignores Until and the lines before the
-// cursor must be found by filtering a larger window.
+// cursor must be found by filtering a larger window. serviceHistoryMaxLines
+// caps that per-task tail.
 const (
 	serviceHistoryTailFactor = 10
 	serviceHistoryMaxLines   = 10000
@@ -205,8 +206,9 @@ const (
 
 // fetchLogHistory reads up to limit log lines older than before (if set).
 // Container logs honour Until and Tail directly. Service logs ignore Until,
-// apply Tail per task and interleave tasks, so for them a wider window is read,
-// lines at or after before are dropped, and the newest limit kept in order.
+// apply Tail per task and group lines by task, so for them a wider window is
+// read in full, lines at or after before are dropped, and the newest limit
+// kept in order.
 func fetchLogHistory(ctx context.Context, open logOpener, id string, service bool, before string, limit int) ([]logEntry, error) {
 	tail := limit
 	if service && before != "" {
@@ -228,28 +230,86 @@ func fetchLogHistory(ctx context.Context, open logOpener, id string, service boo
 	if !service {
 		return readLogLines(reader, limit), nil
 	}
-	return newestLinesBefore(readLogLines(reader, serviceHistoryMaxLines), before, limit), nil
+	return readNewestLinesBefore(reader, before, limit), nil
+}
+
+// readNewestLinesBefore reads a whole log stream and returns its newest limit
+// lines older than before. The stream is read to the end rather than cut at a
+// line count: Docker sends a service's tasks one after another, so a cut would
+// drop whole later tasks, often holding the newest lines.
+func readNewestLinesBefore(reader io.Reader, before string, limit int) []logEntry {
+	kept := newNewestLines(before, limit)
+	dlr := &dockerLogReader{reader: reader}
+	for {
+		streamType, payload, err := dlr.next()
+		if err != nil {
+			break
+		}
+		scanner := bufio.NewScanner(bytes.NewReader(payload))
+		for scanner.Scan() {
+			kept.add(parseLogEntry(streamType, scanner.Text()))
+		}
+	}
+	return kept.result()
 }
 
 // newestLinesBefore drops lines whose timestamp is at or after before (when
 // it parses as RFC 3339), sorts the rest by timestamp and keeps the newest limit.
 func newestLinesBefore(lines []logEntry, before string, limit int) []logEntry {
+	kept := newNewestLines(before, limit)
+	for _, l := range lines {
+		kept.add(l)
+	}
+	return kept.result()
+}
+
+// newestLines keeps the newest limit lines older than a cursor out of any
+// number added. It holds at most twice limit lines, trimming back to the
+// newest limit whenever it fills, so memory stays bounded however long the
+// stream is.
+type newestLines struct {
+	cut    time.Time
+	hasCut bool
+	limit  int
+	lines  []logEntry
+}
+
+func newNewestLines(before string, limit int) *newestLines {
+	n := &newestLines{limit: limit}
 	if cut, err := time.Parse(time.RFC3339Nano, before); err == nil {
-		kept := lines[:0]
-		for _, l := range lines {
-			if ts, err := time.Parse(time.RFC3339Nano, l.Timestamp); err == nil && !ts.Before(cut) {
-				continue
-			}
-			kept = append(kept, l)
+		n.cut, n.hasCut = cut, true
+	}
+	return n
+}
+
+// add keeps l unless its timestamp is at or after the cursor.
+func (n *newestLines) add(l logEntry) {
+	if n.hasCut {
+		if ts, err := time.Parse(time.RFC3339Nano, l.Timestamp); err == nil && !ts.Before(n.cut) {
+			return
 		}
-		lines = kept
 	}
+	n.lines = append(n.lines, l)
+	if len(n.lines) >= 2*n.limit {
+		n.trim()
+	}
+}
+
+// trim sorts the held lines by timestamp and drops all but the newest limit.
+// The sort is stable and earlier survivors stay ahead of later lines, so
+// lines sharing a timestamp keep their stream order.
+func (n *newestLines) trim() {
 	// Docker's fixed-width RFC 3339 UTC timestamps sort correctly as strings.
-	sort.SliceStable(lines, func(i, j int) bool { return lines[i].Timestamp < lines[j].Timestamp })
-	if len(lines) > limit {
-		lines = lines[len(lines)-limit:]
+	sort.SliceStable(n.lines, func(i, j int) bool { return n.lines[i].Timestamp < n.lines[j].Timestamp })
+	if len(n.lines) > n.limit {
+		n.lines = append(n.lines[:0], n.lines[len(n.lines)-n.limit:]...)
 	}
-	return lines
+}
+
+// result returns the kept lines, oldest first.
+func (n *newestLines) result() []logEntry {
+	n.trim()
+	return n.lines
 }
 
 // findTimestampEnd returns the index of the space separating a Docker
