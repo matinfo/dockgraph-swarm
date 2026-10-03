@@ -14,7 +14,7 @@ import { SwarmNodesCard } from "./SwarmNodesCard";
 import { SegmentedToggle } from "../GroupByToggle";
 import { useStatsHistory, type TimeRange, type StatsHistoryData, type HistoryScope } from "../../hooks/useStatsHistory";
 import { useSystemInfo } from "../../hooks/useSystemInfo";
-import { STANDALONE_STACK, isWorkload } from "../../utils/stack";
+import { STANDALONE_STACK, isWorkload, showsSwarmWorkloads } from "../../utils/stack";
 import type { ResourceTab } from "../table/TableView";
 import type { DGNode } from "../../types";
 import type { ContainerStatsData } from "../../types/stats";
@@ -66,8 +66,7 @@ export const Dashboard = memo(function Dashboard({ nodes, statsMap, onStatusFilt
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   const { data: systemInfo } = useSystemInfo();
   const swarm = systemInfo?.mode === "swarm";
-  // Service nodes also mean swarm, before the system info has loaded.
-  const swarmWorkloads = swarm || nodes.some((n) => n.type === "service");
+  const swarmWorkloads = showsSwarmWorkloads(nodes, swarm, stack);
   // Charts plot workloads, or one series per swarm node. Node history isn't
   // per stack, so a selected stack forces the workload view.
   const [historyScope, setHistoryScope] = useState<HistoryScope>("workloads");

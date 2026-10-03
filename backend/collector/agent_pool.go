@@ -37,10 +37,10 @@ type AgentStats struct {
 // Agent pool defaults.
 const (
 	defaultAgentResolveInterval = 30 * time.Second
-	// agentRetryMin is the first retry delay while no agent is known (e.g.
+	// agentRetryInitial is the first retry delay while no agent is known (e.g.
 	// the server started before the agent tasks registered in DNS). It
 	// doubles up to ResolveInterval.
-	agentRetryMin              = 2 * time.Second
+	agentRetryInitial          = 2 * time.Second
 	defaultAgentRequestTimeout = 5 * time.Second
 	agentResolveTimeout        = 5 * time.Second
 	agentTaskLookupTimeout     = 5 * time.Second
@@ -132,7 +132,7 @@ func NewAgentPool(cfg AgentPoolConfig) *AgentPool {
 		agents:    make(map[string]agentEndpoint),
 		owners:    make(map[string]string),
 		lastCount: -1,
-		retryMin:  agentRetryMin,
+		retryMin:  agentRetryInitial,
 	}
 }
 
