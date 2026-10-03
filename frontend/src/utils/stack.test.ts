@@ -144,6 +144,10 @@ describe('resolveNodeRef', () => {
     expect(resolveNodeRef(nodes, 'container:shop_web.2.x7k2p9q4m1n8b5v3c6z0a1s2d')).toBe('service:shop_web');
   });
 
+  it('only strips a real task suffix (25-char task id)', () => {
+    expect(resolveNodeRef(nodes, 'container:shop_web.backup.abcdefghijklmnopqrstu')).toBe('container:shop_web.backup.abcdefghijklmnopqrstu');
+  });
+
   it('still suffix-matches compose names', () => {
     expect(resolveNodeRef(nodes, 'container:cache')).toBe('container:app-cache');
     expect(resolveNodeRef(nodes, 'container:api', 'app')).toBe('container:app-api-1');

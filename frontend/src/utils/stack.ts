@@ -72,7 +72,7 @@ export function seriesLabel(key: string): string {
  * `{service}.{nodeId}.{taskId}` (global); swarm IDs are 25 lowercase base-36
  * characters. Service names may contain dots, so the service is everything
  * before the final two task segments. Mirrors the backend's task-name check in
- * stats history.
+ * stats history; every frontend task-name check goes through serviceOfTask.
  */
 const TASK_NAME = /^(.+)\.(?:\d+|[a-z0-9]{25})\.[a-z0-9]{25}$/;
 
@@ -202,9 +202,6 @@ export function stripStackPrefix(name: string, stack: string | undefined): strin
   return name;
 }
 
-/** Matches the `.{slot|nodeId}.{taskId}` suffix of a swarm task container name. */
-const TASK_SUFFIX = /\.[a-z0-9]+\.[a-z0-9]{20,}$/i;
-
 /**
  * Resolves a cross-reference (`type:name`) to a graph node ID. Docker and
  * compose often refer to workloads by short name (`web`) while graph nodes
@@ -220,7 +217,7 @@ export function resolveNodeRef(nodes: DGNode[], targetId: string, contextStack?:
   if (sepIdx < 0) return targetId;
   const type = targetId.slice(0, sepIdx);
   const name = targetId.slice(sepIdx + 1);
-  const baseName = name.replace(TASK_SUFFIX, '');
+  const baseName = serviceOfTask(name) ?? name;
 
   const types = type === 'container' ? ['container', 'service']
     : type === 'service' ? ['service', 'container']
