@@ -10,7 +10,7 @@ import type { ContainerStatsData } from "../../types/stats";
 interface Props {
   nodes: DGNode[];
   statsMap: Map<string, ContainerStatsData>;
-  /** Open the detail panel for the container the alert refers to. */
+  /** Open the detail panel for the workload the alert refers to. */
   onInspect: (nodeId: string) => void;
 }
 
@@ -46,14 +46,13 @@ export const AlertsCard = memo(function AlertsCard({ nodes, statsMap, onInspect 
       <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
         {alerts.map((alert, i) => {
           const sev = SEVERITY_STYLES[alert.severity];
-          const nodeId = `container:${alert.container}`;
           return (
             <div
               key={`${alert.container}-${alert.message}-${i}`}
               role="button"
               tabIndex={0}
-              onClick={() => onInspect(nodeId)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onInspect(nodeId); } }}
+              onClick={() => onInspect(alert.nodeId)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onInspect(alert.nodeId); } }}
               onMouseEnter={() => setHovered(i)}
               onMouseLeave={() => setHovered(null)}
               title={`Inspect ${alert.container}`}
