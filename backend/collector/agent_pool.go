@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/swarm"
 )
 
@@ -98,12 +99,15 @@ type AgentPool struct {
 
 	mu     sync.RWMutex
 	agents map[string]agentEndpoint // nodeID → agent
-	// owners maps the container IDs and task IDs seen in the last remote
-	// stats poll, unique cluster-wide, to the node that reported them.
+	// owners maps the container IDs seen in the last remote stats poll to
+	// the node that reported them.
 	owners map[string]string
-	// names maps the container names seen in the last remote stats poll to
-	// the node that reported them, or to "" when several nodes did: names
-	// of standalone containers are only unique per node.
+	// taskOwners does the same for task IDs and task container names
+	// ({service}.{slot|node}.{taskID}), which are unique cluster-wide too.
+	taskOwners map[string]string
+	// names maps the other container names seen in the last remote stats
+	// poll to their node, or to "" when several nodes reported the name:
+	// names of standalone containers are only unique per node.
 	names map[string]string
 	// reporting lists the hostnames of agents that answered the last remote
 	// stats poll, even with no samples (e.g. only the agent runs there).
@@ -132,12 +136,13 @@ func NewAgentPool(cfg AgentPoolConfig) *AgentPool {
 		cfg.ResolveInterval = defaultAgentResolveInterval
 	}
 	return &AgentPool{
-		cfg:       cfg,
-		agents:    make(map[string]agentEndpoint),
-		owners:    make(map[string]string),
-		names:     make(map[string]string),
-		lastCount: -1,
-		retryMin:  agentRetryInitial,
+		cfg:        cfg,
+		agents:     make(map[string]agentEndpoint),
+		owners:     make(map[string]string),
+		taskOwners: make(map[string]string),
+		names:      make(map[string]string),
+		lastCount:  -1,
+		retryMin:   agentRetryInitial,
 	}
 }
 
@@ -306,6 +311,7 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	if len(agents) == 0 {
 		p.mu.Lock()
 		p.owners = make(map[string]string)
+		p.taskOwners = make(map[string]string)
 		p.names = make(map[string]string)
 		p.reporting = nil
 		p.mu.Unlock()
@@ -313,12 +319,13 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	}
 
 	var (
-		mu        sync.Mutex
-		wg        sync.WaitGroup
-		samples   []ContainerSample
-		owners    = make(map[string]string)
-		names     = make(map[string]string)
-		reporting []string
+		mu         sync.Mutex
+		wg         sync.WaitGroup
+		samples    []ContainerSample
+		owners     = make(map[string]string)
+		taskOwners = make(map[string]string)
+		names      = make(map[string]string)
+		reporting  []string
 	)
 	for nodeID, a := range agents {
 		wg.Add(1)
@@ -344,13 +351,13 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 				s.NodeHostname = a.hostname
 				samples = append(samples, s)
 				owners[s.ID] = nodeID
-				if owner, seen := names[s.Name]; seen && owner != nodeID {
+				if tid := s.TaskID(); tid != "" {
+					taskOwners[tid] = nodeID
+					taskOwners[s.Name] = nodeID
+				} else if owner, seen := names[s.Name]; seen && owner != nodeID {
 					names[s.Name] = "" // same name on several nodes
 				} else {
 					names[s.Name] = nodeID
-				}
-				if tid := s.TaskID(); tid != "" {
-					owners[tid] = nodeID
 				}
 			}
 		}()
@@ -360,6 +367,7 @@ func (p *AgentPool) Samples(ctx context.Context) []ContainerSample {
 	sort.Strings(reporting)
 	p.mu.Lock()
 	p.owners = owners
+	p.taskOwners = taskOwners
 	p.names = names
 	p.reporting = reporting
 	p.mu.Unlock()
@@ -379,10 +387,27 @@ func (p *AgentPool) ReportingNodes() []string {
 // that node is not the local one and has a known agent. A name or ID prefix
 // matching containers on several nodes is not located.
 func (p *AgentPool) LocateContainer(ctx context.Context, id string) (string, bool) {
-	nodeID, found := p.ownerFromSamples(id)
-	if !found {
-		nodeID = p.ownerFromTasks(ctx, id)
+	nodeID := p.uniqueOwner(id)
+	if nodeID == "" {
+		var named bool
+		if nodeID, named = p.nameOwner(id); !named {
+			nodeID = p.ownerFromTasks(ctx, id)
+		}
 	}
+	return p.agentURL(nodeID)
+}
+
+// LocateCached is LocateContainer limited to the last remote stats poll and
+// to keys unique cluster-wide (container ID or ID prefix, task ID, task
+// container name), so a local container can't share them. It makes no
+// Docker call.
+func (p *AgentPool) LocateCached(id string) (string, bool) {
+	return p.agentURL(p.uniqueOwner(id))
+}
+
+// agentURL returns the base URL of nodeID's agent, unless nodeID is empty,
+// the local node or has no known agent.
+func (p *AgentPool) agentURL(nodeID string) (string, bool) {
 	if nodeID == "" || nodeID == p.cfg.LocalNodeID {
 		return "", false
 	}
@@ -395,50 +420,68 @@ func (p *AgentPool) LocateContainer(ctx context.Context, id string) (string, boo
 	return "http://" + a.addr, true
 }
 
-// ownerFromSamples looks id up in the last remote stats poll. found is true
-// when id matched there; nodeID is then "" if it matched on several nodes.
-func (p *AgentPool) ownerFromSamples(id string) (nodeID string, found bool) {
+// uniqueOwner looks id up in the last remote stats poll by container ID or
+// ID prefix (12+ characters), task ID or task container name. A prefix
+// matching containers on several nodes has no owner.
+func (p *AgentPool) uniqueOwner(id string) string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if nodeID, ok := p.owners[id]; ok {
-		return nodeID, true
+		return nodeID
 	}
-	if nodeID, ok := p.names[id]; ok {
-		return nodeID, true
+	if nodeID, ok := p.taskOwners[id]; ok {
+		return nodeID
 	}
+	nodeID := ""
 	if len(id) >= 12 {
 		for key, owner := range p.owners {
 			if !strings.HasPrefix(key, id) {
 				continue
 			}
-			if found && owner != nodeID {
-				return "", true // ambiguous prefix
+			if nodeID != "" && owner != nodeID {
+				return "" // ambiguous prefix
 			}
-			nodeID, found = owner, true
+			nodeID = owner
 		}
 	}
+	return nodeID
+}
+
+// nameOwner looks a container name up in the last remote stats poll. found
+// is true when the name was seen; nodeID is then "" if several nodes run a
+// container with that name.
+func (p *AgentPool) nameOwner(name string) (nodeID string, found bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	nodeID, found = p.names[name]
 	return nodeID, found
 }
 
 // ownerFromTasks finds the task running container id through the swarm
-// task list. Task container names are {service}.{slot|node}.{taskID}.
+// task list. Task container names are {service}.{slot|node}.{taskID}. Only
+// an id that may be a container ID needs the whole list; any other is
+// filtered down to its task ID.
 func (p *AgentPool) ownerFromTasks(ctx context.Context, id string) string {
 	if p.cfg.Tasks == nil {
 		return ""
 	}
+	taskID := id[strings.LastIndexByte(id, '.')+1:]
+	if taskID == "" {
+		return ""
+	}
+	var opts swarm.TaskListOptions
+	if !maybeContainerID(id) {
+		opts.Filters = filters.NewArgs(filters.Arg("id", taskID))
+	}
 	ctx, cancel := context.WithTimeout(ctx, agentTaskLookupTimeout)
 	defer cancel()
-	tasks, err := p.cfg.Tasks.TaskList(ctx, swarm.TaskListOptions{})
+	tasks, err := p.cfg.Tasks.TaskList(ctx, opts)
 	if err != nil {
 		log.Printf("agents: task lookup for %s: %v", id, err)
 		return ""
 	}
-	nameTaskID := ""
-	if i := strings.LastIndexByte(id, '.'); i >= 0 {
-		nameTaskID = id[i+1:]
-	}
 	for _, t := range tasks {
-		if t.ID == id || (nameTaskID != "" && t.ID == nameTaskID) {
+		if t.ID == taskID {
 			return t.NodeID
 		}
 		if cs := t.Status.ContainerStatus; cs != nil && cs.ContainerID != "" {
@@ -448,6 +491,20 @@ func (p *AgentPool) ownerFromTasks(ctx context.Context, id string) string {
 		}
 	}
 	return ""
+}
+
+// maybeContainerID reports whether id can be a container ID or an ID prefix
+// long enough to match one (12 to 64 hex digits).
+func maybeContainerID(id string) bool {
+	if len(id) < 12 || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // getJSON performs an authenticated GET on an agent endpoint and decodes

@@ -280,6 +280,76 @@ func TestAgentPoolLocateContainerSameNameOnTwoNodes(t *testing.T) {
 	}
 }
 
+func TestAgentPoolLocateCachedOnlyUniqueKeys(t *testing.T) {
+	remote := newFakeAgent(t, "node-remote",
+		taskSample("bbbbbbbbbbbbbbbb", "shop_web.2.t2", "shop_web", "t2", 1, 1),
+		ContainerSample{ID: "dddddddddddddddd", Name: "redis"})
+	tasks := &stubDockerClient{}
+	p := newTestPool(&stubResolver{addrs: []string{remote.addr()}}, "node-local", tasks)
+	p.Refresh(context.Background())
+	p.Samples(context.Background())
+
+	want := "http://" + remote.addr()
+	for _, id := range []string{"bbbbbbbbbbbbbbbb", "bbbbbbbbbbbb", "t2", "shop_web.2.t2", "dddddddddddd"} {
+		if got, ok := p.LocateCached(id); !ok || got != want {
+			t.Errorf("LocateCached(%q) = %q,%v want %q", id, got, ok, want)
+		}
+	}
+	// A standalone name may also exist locally: only the full lookup,
+	// run after the local daemon was asked, resolves it.
+	if _, ok := p.LocateCached("redis"); ok {
+		t.Error("LocateCached must not resolve a standalone container name")
+	}
+	if got, ok := p.LocateContainer(context.Background(), "redis"); !ok || got != want {
+		t.Errorf("LocateContainer(redis) = %q,%v want %q", got, ok, want)
+	}
+	tasks.mu.Lock()
+	defer tasks.mu.Unlock()
+	if tasks.taskListCalls != 0 {
+		t.Errorf("task list calls %d, want 0 for sampled containers", tasks.taskListCalls)
+	}
+}
+
+// recordingTasks records the options of every TaskList call.
+type recordingTasks struct {
+	mu   sync.Mutex
+	opts []swarm.TaskListOptions
+}
+
+func (r *recordingTasks) TaskList(_ context.Context, opts swarm.TaskListOptions) ([]swarm.Task, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.opts = append(r.opts, opts)
+	return nil, nil
+}
+
+func TestAgentPoolTaskLookupFiltersByTaskID(t *testing.T) {
+	cases := []struct {
+		id         string
+		wantFilter string // "" for the whole task list
+	}{
+		{"shop_api.1.t9", "t9"}, // task container name
+		{"t9", "t9"},            // task ID
+		{"mistyped-name", "mistyped-name"},
+		{"cccccccccccc", ""}, // container ID prefix: needs every task
+		{"cccccccccccccccccccc", ""},
+	}
+	for _, c := range cases {
+		tasks := &recordingTasks{}
+		p := newTestPool(&stubResolver{}, "node-local", tasks)
+		if _, ok := p.LocateContainer(context.Background(), c.id); ok {
+			t.Errorf("%s: located with no tasks", c.id)
+		}
+		if len(tasks.opts) != 1 {
+			t.Fatalf("%s: %d task list calls, want 1", c.id, len(tasks.opts))
+		}
+		got := tasks.opts[0].Filters.Get("id")
+		if c.wantFilter == "" && len(got) != 0 || c.wantFilter != "" && !slices.Equal(got, []string{c.wantFilter}) {
+			t.Errorf("%s: id filter %v, want %q", c.id, got, c.wantFilter)
+		}
+	}
+}
+
 func TestAgentPoolStartStop(t *testing.T) {
 	a := newFakeAgent(t, "node-1")
 	res := &stubResolver{addrs: []string{a.addr()}}
