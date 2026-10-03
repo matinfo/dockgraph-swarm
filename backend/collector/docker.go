@@ -25,6 +25,11 @@ type DockerCollector struct {
 	swarm            bool
 	taskPollInterval time.Duration
 
+	// pollMu serializes full polls. The periodic, event and task-poll
+	// triggers run in separate goroutines; without it a slower, older
+	// snapshot could be published after a newer one and roll state back.
+	pollMu sync.Mutex
+
 	// fpMu guards the fingerprint of the task set last snapshotted, compared
 	// by the task poller to detect remote task changes.
 	fpMu   sync.Mutex
@@ -95,7 +100,11 @@ func (d *DockerCollector) Stop() error {
 	return nil
 }
 
+// poll builds a snapshot and publishes it. Polls never overlap, so snapshots
+// are published in the order they were observed.
 func (d *DockerCollector) poll(ctx context.Context) error {
+	d.pollMu.Lock()
+	defer d.pollMu.Unlock()
 	pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	snapshot, err := d.snapshot(pollCtx)
