@@ -110,6 +110,14 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// Bearer challenges sent with a 401 (RFC 6750 section 3): without
+// credentials the challenge names only the scheme and realm, and a rejected
+// token adds error="invalid_token".
+const (
+	challengeNoToken      = "Bearer realm=\"dockgraph-agent\""
+	challengeInvalidToken = "Bearer realm=\"dockgraph-agent\", error=\"invalid_token\""
+)
+
 // requireToken rejects requests without the exact bearer token. Both sides
 // are hashed first so the comparison is constant-time regardless of length.
 func (s *Server) requireToken(next http.Handler) http.Handler {
@@ -117,7 +125,11 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		got := sha256.Sum256([]byte(token))
 		if !ok || subtle.ConstantTimeCompare(got[:], s.tokenHash[:]) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="dockgraph-agent"`)
+			challenge := challengeInvalidToken
+			if !ok {
+				challenge = challengeNoToken
+			}
+			w.Header().Set("WWW-Authenticate", challenge)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
