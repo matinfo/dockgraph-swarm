@@ -160,7 +160,6 @@ export const StackSelector = memo(function StackSelector({ stacks, selected, onS
           padding: "5px 10px",
           fontSize: 12,
           cursor: "pointer",
-          outline: "none",
         }}
       >
         <span style={{ color: theme.nodeSubtext, fontSize: 11 }}>Stack</span>

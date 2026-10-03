@@ -58,6 +58,19 @@ describe('DetailPanelServiceHeader', () => {
 });
 
 describe('DetailPanelService', () => {
+  it('says so when swarm could not report the replicas and tasks', () => {
+    const unknown: ServiceDetail = { ...detail, status: 'unknown', replicas: null, tasks: [], tasksUnavailable: true };
+    render(
+      <ThemeProvider>
+        <DetailPanelServiceHeader detail={unknown} />
+        <DetailPanelService detail={unknown} statsMap={new Map()} active={false} onNavigate={vi.fn()} />
+      </ThemeProvider>,
+    );
+    expect(screen.getAllByText('Unknown').length).toBe(2); // status badge and replicas row
+    expect(screen.getByText('Tasks unavailable.')).toBeDefined();
+    expect(screen.queryByText('No tasks.')).toBeNull();
+  });
+
   it('shows replicas and update status', () => {
     renderPanel();
     expect(screen.getByText('1 / 2')).toBeDefined();
@@ -89,7 +102,8 @@ describe('DetailPanelService', () => {
 
   it('navigates to networks and volumes', () => {
     const onNavigate = renderPanel();
-    fireEvent.click(screen.getByText('shop_front'));
+    // A real button, so keyboard users can focus and activate it.
+    fireEvent.click(screen.getByRole('button', { name: 'shop_front' }));
     expect(onNavigate).toHaveBeenCalledWith('network:shop_front');
     fireEvent.click(screen.getByText('shop_data'));
     expect(onNavigate).toHaveBeenCalledWith('volume:shop_data');

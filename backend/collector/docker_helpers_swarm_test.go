@@ -33,8 +33,12 @@ func TestProjectLabels(t *testing.T) {
 	if got := projectLabels(map[string]string{"other": "x"}); got != nil {
 		t.Errorf("expected nil, got %v", got)
 	}
+	// The stack namespace is carried by Node.Stack, not the payload labels.
+	if got := projectLabels(map[string]string{StackNamespaceLabel: "b"}); got != nil {
+		t.Errorf("stack namespace forwarded: %v", got)
+	}
 	got := projectLabels(map[string]string{composeProjectLabel: "a", StackNamespaceLabel: "b", "other": "x"})
-	if len(got) != 2 || got[composeProjectLabel] != "a" || got[StackNamespaceLabel] != "b" {
+	if len(got) != 1 || got[composeProjectLabel] != "a" {
 		t.Errorf("got %v", got)
 	}
 }
@@ -51,7 +55,8 @@ func TestResolveNetworkNamesSkipsSwarmPlumbing(t *testing.T) {
 	}
 }
 
-// Standalone mode: stack-labelled resources get Node.Stack and keep the stack label.
+// Standalone mode: stack-labelled resources get Node.Stack; the stack label
+// itself stays out of the payload labels.
 func TestAssembleSnapshotSetsStack(t *testing.T) {
 	stack := map[string]string{StackNamespaceLabel: "shop"}
 	res := dockerResources{
@@ -69,7 +74,7 @@ func TestAssembleSnapshotSetsStack(t *testing.T) {
 		if n == nil {
 			t.Fatalf("%s missing", id)
 		}
-		if n.Stack != "shop" || n.Labels[StackNamespaceLabel] != "shop" {
+		if n.Stack != "shop" || n.Labels != nil {
 			t.Errorf("%s: stack=%q labels=%v", id, n.Stack, n.Labels)
 		}
 	}

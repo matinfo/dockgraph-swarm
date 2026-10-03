@@ -1,20 +1,8 @@
 import { memo } from 'react';
 import { useTheme } from '../theme';
 import { swarmRoleColor, swarmNodeStateColor } from '../utils/colors';
+import { chip } from '../utils/chipStyle';
 import type { SwarmNodeInfo } from '../types';
-
-const chip: React.CSSProperties = {
-  flexShrink: 0,
-  fontFamily: 'var(--dg-font-mono)',
-  fontSize: 9,
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
-  borderRadius: 3,
-  padding: '0 4px',
-  lineHeight: '13px',
-  whiteSpace: 'nowrap',
-};
 
 /** "manager ★" (leader) / "manager" / "worker" chip. */
 export const SwarmRoleBadge = memo(function SwarmRoleBadge({ info }: { info: SwarmNodeInfo | undefined }) {

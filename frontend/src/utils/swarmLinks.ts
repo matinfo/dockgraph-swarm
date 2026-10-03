@@ -6,8 +6,10 @@ import type { DGEdge, DGNode } from '../types';
 /** React Flow edge type of the per-node view's links. */
 export const SWARM_LINK_EDGE_TYPE = 'swarmLink';
 
-/** Id of the Managers → Workers control-plane link. */
-export const CONTROL_LINK_ID = 'swarmlink:control';
+/** Id of one manager→worker control-plane spoke. */
+export function controlLinkId(workerId: string): string {
+  return `swarmlink:control:${workerId}`;
+}
 
 /** Most overlay links drawn for one selection, to keep the view readable. */
 export const MAX_OVERLAY_LINKS = 60;
@@ -17,9 +19,7 @@ export const SWARM_CONTROL_PORT = 2377;
 
 export interface ControlLinkData {
   kind: 'control';
-  /** Workers whose swarm state is "ready" (drained nodes are still connected). */
-  ready: number;
-  total: number;
+  /** This worker's own connection state — "ready" (drained nodes still count). */
   healthy: boolean;
 }
 
@@ -34,28 +34,32 @@ export interface OverlayLinkData {
 export type SwarmLinkData = ControlLinkData | OverlayLinkData;
 
 /**
- * The control-plane link of the per-node view: one edge from the Managers
- * group to the Workers group. The Docker API doesn't say which manager a
- * worker is attached to, so the link joins the groups rather than boxes and
- * carries the workers' health instead. Null unless both groups exist.
+ * The control-plane links of the per-node view: one spoke per worker, from
+ * the Managers group to that worker's box. The Docker API doesn't say which
+ * manager a worker is attached to, so every spoke starts at the group rather
+ * than a specific manager box — but fanning out to each worker, instead of
+ * joining the two groups with a single aggregate line, shows which workers
+ * are actually connected rather than just a ready/total count. Empty unless
+ * both a manager and at least one worker exist.
  */
-export function controlLinkEdge(dgNodes: DGNode[]): RFEdge | null {
+export function controlLinkEdges(dgNodes: DGNode[]): RFEdge[] {
   const nodes = listSwarmNodes(dgNodes);
   const workers = nodes.filter((n) => swarmRole(n) === 'worker');
-  if (workers.length === 0 || !nodes.some((n) => swarmRole(n) === 'manager')) return null;
-  const ready = workers.filter((n) => (n.swarmNode?.state ?? n.status) === 'ready').length;
-  const data: ControlLinkData = { kind: 'control', ready, total: workers.length, healthy: ready === workers.length };
-  return {
-    id: CONTROL_LINK_ID,
-    type: SWARM_LINK_EDGE_TYPE,
-    source: roleGroupId('manager'),
-    target: roleGroupId('worker'),
-    // React Flow's moving dash while every worker is connected.
-    animated: data.healthy,
-    selectable: false,
-    focusable: false,
-    data: data as unknown as Record<string, unknown>,
-  };
+  if (workers.length === 0 || !nodes.some((n) => swarmRole(n) === 'manager')) return [];
+  const source = roleGroupId('manager');
+  return workers.map((w) => {
+    const healthy = (w.swarmNode?.state ?? w.status) === 'ready';
+    const data: ControlLinkData = { kind: 'control', healthy };
+    return {
+      id: controlLinkId(w.id),
+      type: SWARM_LINK_EDGE_TYPE,
+      source,
+      target: w.id,
+      selectable: false,
+      focusable: false,
+      data: data as unknown as Record<string, unknown>,
+    };
+  });
 }
 
 /** Network names each service is attached to: its primary network plus secondary ones. */

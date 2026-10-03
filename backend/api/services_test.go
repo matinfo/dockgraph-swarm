@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -154,6 +155,83 @@ func TestHandleServiceInspect(t *testing.T) {
 	}
 }
 
+// inspectReplicas fetches a service and decodes its status fields.
+func inspectReplicas(t *testing.T, stub *stubDockerAPI, name string) (status string, replicas *collector.ReplicaCount, tasksUnavailable bool) {
+	t.Helper()
+	srv := newSwarmTestServer(stub, collector.ModeSwarm)
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/api/services/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var body struct {
+		Status           string                  `json:"status"`
+		Replicas         *collector.ReplicaCount `json:"replicas"`
+		TasksUnavailable bool                    `json:"tasksUnavailable"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return body.Status, body.Replicas, body.TasksUnavailable
+}
+
+func TestHandleServiceInspectTaskListFailure(t *testing.T) {
+	down := errors.New("swarm manager unavailable")
+
+	t.Run("falls back to swarm's own counts", func(t *testing.T) {
+		stub := swarmStub()
+		stub.taskErr = down
+		stub.serviceStatus = map[string]*swarm.ServiceStatus{"svc-web": {RunningTasks: 2, DesiredTasks: 2}}
+		status, replicas, unavailable := inspectReplicas(t, stub, "shop_web")
+		// Not 0/2 degraded: the tasks are unknown, not absent.
+		if status != "running" || replicas == nil || *replicas != (collector.ReplicaCount{Running: 2, Desired: 2}) || !unavailable {
+			t.Errorf("status %q replicas %+v unavailable %v", status, replicas, unavailable)
+		}
+	})
+
+	t.Run("unknown when the counts are unavailable too", func(t *testing.T) {
+		stub := swarmStub()
+		stub.taskErr = down
+		stub.serviceListErr = down
+		status, replicas, unavailable := inspectReplicas(t, stub, "shop_web")
+		if status != collector.ServiceStatusUnknown || replicas != nil || !unavailable {
+			t.Errorf("status %q replicas %+v unavailable %v", status, replicas, unavailable)
+		}
+	})
+}
+
+func TestHandleServiceInspectNodeListFailure(t *testing.T) {
+	down := errors.New("swarm manager unavailable")
+
+	t.Run("replicated desired count comes from the spec", func(t *testing.T) {
+		stub := swarmStub()
+		stub.nodeErr = down
+		status, replicas, unavailable := inspectReplicas(t, stub, "shop_web")
+		if status != "degraded" || replicas == nil || *replicas != (collector.ReplicaCount{Running: 1, Desired: 2}) || unavailable {
+			t.Errorf("status %q replicas %+v unavailable %v", status, replicas, unavailable)
+		}
+		if stub.serviceListCalls != 0 {
+			t.Errorf("service list called %d times, want 0", stub.serviceListCalls)
+		}
+	})
+
+	t.Run("global desired count falls back to swarm's counts", func(t *testing.T) {
+		stub := swarmStub()
+		stub.nodeErr = down
+		stub.services[2].Spec.Mode = swarm.ServiceMode{Global: &swarm.GlobalService{}} // blog_app, one running task
+		stub.serviceStatus = map[string]*swarm.ServiceStatus{"svc-blog": {RunningTasks: 1, DesiredTasks: 1}}
+		status, replicas, _ := inspectReplicas(t, stub, "blog_app")
+		// Not "stopped" from zero eligible nodes.
+		if status != "running" || replicas == nil || *replicas != (collector.ReplicaCount{Running: 1, Desired: 1}) {
+			t.Errorf("status %q replicas %+v", status, replicas)
+		}
+	})
+}
+
 func TestHandleServiceInspectErrors(t *testing.T) {
 	srv := newSwarmTestServer(swarmStub(), collector.ModeSwarm)
 	defer srv.Close()
@@ -276,6 +354,12 @@ func TestAggregateLogsHistoryStackStandalone(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodGet, "/api/logs/history?stack=x", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("one-character stack: status %d, want 200", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
 	h(rec, httptest.NewRequest(http.MethodGet, "/api/logs/history?stack=../x", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid stack: status %d", rec.Code)
@@ -389,10 +473,12 @@ func TestHandleStatsHistoryStackFilter(t *testing.T) {
 	h.Record(time.Now().Add(-time.Minute), collector.StatsSnapshot{Stats: map[string]collector.ContainerStats{
 		"shop-web-1": {CPUPercent: 1},
 		"blog-app-1": {CPUPercent: 2},
+		"a-db-1":     {CPUPercent: 3},
 	}})
 	lister := mockLister{summaries: []containertypes.Summary{
 		{Names: []string{"/shop-web-1"}, Labels: map[string]string{"com.docker.compose.project": "shop"}},
 		{Names: []string{"/blog-app-1"}, Labels: map[string]string{collector.StackNamespaceLabel: "blog"}},
+		{Names: []string{"/a-db-1"}, Labels: map[string]string{"com.docker.compose.project": "a"}},
 	}}
 	handler := HandleStatsHistory(h, lister, nil)
 
@@ -400,8 +486,9 @@ func TestHandleStatsHistoryStackFilter(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"", []string{"shop-web-1", "blog-app-1"}},
+		{"", []string{"shop-web-1", "blog-app-1", "a-db-1"}},
 		{"&stack=shop", []string{"shop-web-1"}},
+		{"&stack=a", []string{"a-db-1"}}, // one-character project names are valid
 		{"&stack=blog", []string{"blog-app-1"}},
 		{"&stack=none", nil},
 	}

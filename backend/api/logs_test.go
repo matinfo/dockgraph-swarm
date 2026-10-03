@@ -367,6 +367,12 @@ type stubDockerAPI struct {
 	nodes       []swarm.Node
 	serviceLogs map[string]string
 	networks    map[string]string // network ID -> name
+
+	// Swarm's own task counts, returned by ServiceList with Status set.
+	serviceStatus map[string]*swarm.ServiceStatus
+	// Failure injection for the list calls.
+	taskErr, nodeErr, serviceListErr error
+	serviceListCalls                 int
 }
 
 func (s *stubDockerAPI) findService(id string) (swarm.Service, bool) {
@@ -385,11 +391,26 @@ func (s *stubDockerAPI) ServiceInspectWithRaw(_ context.Context, id string, _ sw
 	return swarm.Service{}, nil, fmt.Errorf("service %s not found", id)
 }
 
-func (s *stubDockerAPI) ServiceList(_ context.Context, _ swarm.ServiceListOptions) ([]swarm.Service, error) {
-	return s.services, nil
+func (s *stubDockerAPI) ServiceList(_ context.Context, opts swarm.ServiceListOptions) ([]swarm.Service, error) {
+	s.serviceListCalls++
+	if s.serviceListErr != nil {
+		return nil, s.serviceListErr
+	}
+	if !opts.Status {
+		return s.services, nil
+	}
+	out := make([]swarm.Service, len(s.services))
+	for i, svc := range s.services {
+		svc.ServiceStatus = s.serviceStatus[svc.ID]
+		out[i] = svc
+	}
+	return out, nil
 }
 
 func (s *stubDockerAPI) TaskList(_ context.Context, opts swarm.TaskListOptions) ([]swarm.Task, error) {
+	if s.taskErr != nil {
+		return nil, s.taskErr
+	}
 	var out []swarm.Task
 	for _, t := range s.tasks {
 		if opts.Filters.Len() == 0 || opts.Filters.ExactMatch("service", t.ServiceID) {
@@ -400,6 +421,9 @@ func (s *stubDockerAPI) TaskList(_ context.Context, opts swarm.TaskListOptions) 
 }
 
 func (s *stubDockerAPI) NodeList(_ context.Context, _ swarm.NodeListOptions) ([]swarm.Node, error) {
+	if s.nodeErr != nil {
+		return nil, s.nodeErr
+	}
 	return s.nodes, nil
 }
 

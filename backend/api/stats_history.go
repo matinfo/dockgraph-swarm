@@ -48,7 +48,7 @@ func HandleStatsHistory(history *collector.StatsHistory, lister ContainerLister,
 		}
 
 		stack := r.URL.Query().Get("stack")
-		if stack != "" && !validResourceName.MatchString(stack) {
+		if stack != "" && !validStackName.MatchString(stack) {
 			jsonError(w, "invalid stack", http.StatusBadRequest)
 			return
 		}

@@ -22,8 +22,8 @@ import type { ContainerStatsData } from "../../types/stats";
 interface Props {
   nodes: DGNode[];
   statsMap: Map<string, ContainerStatsData>;
-  /** Open the table view filtered to a single container status. */
-  onStatusFilter: (status: string) => void;
+  /** Open the table view's `tab` filtered to a single status. */
+  onStatusFilter: (status: string, tab: ResourceTab) => void;
   /** Open the table view on a specific resource subtab. */
   onResourceTab: (tab: ResourceTab) => void;
   /** Open the detail panel for the given graph node id. */
@@ -66,6 +66,8 @@ export const Dashboard = memo(function Dashboard({ nodes, statsMap, onStatusFilt
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   const { data: systemInfo } = useSystemInfo();
   const swarm = systemInfo?.mode === "swarm";
+  // Service nodes also mean swarm, before the system info has loaded.
+  const swarmWorkloads = swarm || nodes.some((n) => n.type === "service");
   // Charts plot workloads, or one series per swarm node. Node history isn't
   // per stack, so a selected stack forces the workload view.
   const [historyScope, setHistoryScope] = useState<HistoryScope>("workloads");
@@ -117,7 +119,7 @@ export const Dashboard = memo(function Dashboard({ nodes, statsMap, onStatusFilt
 
         {/* Row 1: 4 summary cards — equal height */}
         <div style={{ display: "grid", gridTemplateColumns: cols4, gap: 12, marginBottom: 12 }}>
-          <StatusSummaryCard nodes={nodes} onStatusFilter={onStatusFilter} onResourceTab={onResourceTab} />
+          <StatusSummaryCard nodes={nodes} swarm={swarmWorkloads} onStatusFilter={onStatusFilter} onResourceTab={onResourceTab} />
           <HostInfoCard />
           <DiskUsageCard />
           <ImagesCard />

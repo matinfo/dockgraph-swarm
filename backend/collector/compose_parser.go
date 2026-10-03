@@ -298,11 +298,10 @@ func buildComposeConfig(svc composetypes.ServiceConfig, naming composeNaming) *C
 		}
 	}
 
+	// Labels get the same masking as live service labels: a stack-file ghost
+	// shows them in the service panel, and they may carry credentials.
 	if len(svc.Labels) > 0 {
-		cfg.Labels = make(map[string]string, len(svc.Labels))
-		for k, v := range svc.Labels {
-			cfg.Labels[k] = v
-		}
+		cfg.Labels = secrets.MaskLabels(svc.Labels)
 	}
 
 	// Store the full container node name (project-prefixed, replica-suffixed)

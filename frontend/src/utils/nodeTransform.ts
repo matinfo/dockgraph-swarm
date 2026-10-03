@@ -1,6 +1,9 @@
 import type { Node as RFNode } from '@xyflow/react';
 import { projectOf } from './stack';
-import type { DGNode, TaskInfo, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData, SwarmRole } from '../types';
+import type { DGNode, TaskInfo, SwarmNodeGroupData, NodeServiceCardData, RoleGroupData, ControlSummaryData, SwarmRole } from '../types';
+
+/** Id of the control-plane summary badge between the Managers and Workers groups. */
+export const CONTROL_SUMMARY_ID = 'controlsummary';
 
 /** Group id for tasks the scheduler hasn't placed on a node yet. */
 export const UNASSIGNED_NODE_GROUP_ID = 'nodegroup:unassigned';
@@ -40,8 +43,19 @@ export function listSwarmNodes(dgNodes: DGNode[]): DGNode[] {
 }
 
 /**
- * Places every task that should be running (desiredState "running") of the
- * services in `dgNodes` onto its swarm node. Keys are swarmnode graph ids, or
+ * True for a task swarm still keeps on its node: any desired state except
+ * "shutdown" and "remove". Job tasks end with desired state "complete" and
+ * stay listed. Mirrors the backend's active-task check in buildServiceInfo;
+ * the other tasks it sends are recent failures, shown only in the service
+ * detail panel.
+ */
+export function isActiveTask(task: TaskInfo): boolean {
+  return task.desiredState !== 'shutdown' && task.desiredState !== 'remove';
+}
+
+/**
+ * Places every active task (see isActiveTask) of the services in `dgNodes`
+ * onto its swarm node. Keys are swarmnode graph ids, or
  * UNASSIGNED_NODE_GROUP_ID for tasks without a (known) node — typically
  * pending tasks the scheduler couldn't place. Each list is sorted by stack,
  * service and slot, so tasks read as grouped by service.
@@ -59,7 +73,7 @@ export function placeTasks(dgNodes: DGNode[]): Map<string, PlacedTask[]> {
   for (const service of dgNodes) {
     if (service.type !== 'service') continue;
     for (const task of service.service?.tasks ?? []) {
-      if (task.desiredState !== 'running') continue;
+      if (!isActiveTask(task)) continue;
       const group =
         (task.nodeHostname && byHostname.get(task.nodeHostname)) ||
         (task.nodeId && byNodeId.get(task.nodeId)) ||
@@ -202,9 +216,13 @@ export function toNodeGroupedFlowNodes(dgNodes: DGNode[], localNodeId?: string |
     return taskCount;
   };
 
+  let hasManagers = false;
+  let workers: DGNode[] = [];
   for (const role of ['manager', 'worker'] as const) {
     const members = swarmNodes.filter((n) => swarmRole(n) === role);
     if (members.length === 0) continue;
+    if (role === 'manager') hasManagers = true;
+    else workers = members;
     const gid = roleGroupId(role);
     const group: RFNode = {
       id: gid,
@@ -220,6 +238,23 @@ export function toNodeGroupedFlowNodes(dgNodes: DGNode[], localNodeId?: string |
     for (const n of members) taskCount += addBox(n.id, n, gid, role);
     const data: RoleGroupData = { role, nodeCount: members.length, taskCount };
     group.data = data as unknown as Record<string, unknown>;
+  }
+
+  // Control-plane summary badge, free-standing in the gap between the two
+  // groups (see layout/nodeLayout.ts for its position). Only when both a
+  // manager and at least one worker exist, matching the old aggregate link.
+  if (hasManagers && workers.length > 0) {
+    const ready = workers.filter((n) => (n.swarmNode?.state ?? n.status) === 'ready').length;
+    const data: ControlSummaryData = { ready, total: workers.length, healthy: ready === workers.length };
+    roles.push({
+      id: CONTROL_SUMMARY_ID,
+      type: 'controlSummary',
+      position: { x: 0, y: 0 },
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      data: data as unknown as Record<string, unknown>,
+    });
   }
   if (placed.has(UNASSIGNED_NODE_GROUP_ID)) {
     addBox(

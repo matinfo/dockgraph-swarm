@@ -74,6 +74,11 @@ body {
 /* Network groups carry a legend that straddles the top border, so they must be
    allowed to paint outside their box (container nodes keep full containment). */
 .react-flow__node-networkGroup { contain: layout style !important; overflow: visible !important; }
+/* The control-plane badge centers itself on its anchor via translate(-50%, -50%),
+   so its content always extends outside its own (auto-sized, near-zero) box.
+   It also sits right where the control spokes cross the gap, so it is lifted
+   above the edge layer (z-index 1000 above) to keep the spokes behind it. */
+.react-flow__node-controlSummary { contain: layout style !important; overflow: visible !important; z-index: 1001 !important; }
 
 .react-flow__controls {
   background: ${bg} !important;

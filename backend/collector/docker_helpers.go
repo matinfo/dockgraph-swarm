@@ -40,20 +40,15 @@ func ProjectOf(labels map[string]string) string {
 	return labels[StackNamespaceLabel]
 }
 
-// projectLabels keeps only the project-identifying labels (compose project and
-// stack namespace) from a resource's labels, or nil when neither is set. Graph
-// nodes carry just these to keep the wire payload small.
+// projectLabels keeps only the compose project label from a resource's
+// labels, or nil when it is not set. Graph nodes carry just this to keep the
+// wire payload small. The swarm stack namespace stays out: Node.Stack already
+// carries the stack.
 func projectLabels(labels map[string]string) map[string]string {
-	var out map[string]string
-	for _, k := range []string{composeProjectLabel, StackNamespaceLabel} {
-		if v := labels[k]; v != "" {
-			if out == nil {
-				out = make(map[string]string, 2)
-			}
-			out[k] = v
-		}
+	if p := labels[composeProjectLabel]; p != "" {
+		return map[string]string{composeProjectLabel: p}
 	}
-	return out
+	return nil
 }
 
 // isTopologyEvent returns true for Docker events that indicate a change

@@ -3,13 +3,15 @@ import {
   toNodeGroupedFlowNodes,
   nodeGroupedTopologyKey,
   placeTasks,
+  isActiveTask,
   nodeUsage,
   UNASSIGNED_NODE_GROUP_ID,
+  CONTROL_SUMMARY_ID,
   roleGroupId,
   isSwarmNodeInactive,
 } from './nodeTransform';
 import { filterGraphByStack } from './stack';
-import type { DGNode, NodeServiceCardData, SwarmNodeGroupData, RoleGroupData } from '../types';
+import type { DGNode, NodeServiceCardData, SwarmNodeGroupData, RoleGroupData, ControlSummaryData } from '../types';
 
 const mgr: DGNode = {
   id: 'swarmnode:mgr', type: 'swarmnode', name: 'mgr', status: 'ready',
@@ -78,6 +80,28 @@ describe('toNodeGroupedFlowNodes', () => {
   it('omits a role group without nodes', () => {
     const rf = toNodeGroupedFlowNodes([web, mgr], null);
     expect(rf.filter((n) => n.type === 'roleGroup').map((n) => n.id)).toEqual(['rolegroup:manager']);
+  });
+
+  it('adds a control summary badge when both a manager and a worker exist', () => {
+    const rf = toNodeGroupedFlowNodes(all, 'n1');
+    const summary = rf.find((n) => n.id === CONTROL_SUMMARY_ID)!;
+    expect(summary.type).toBe('controlSummary');
+    expect(summary.draggable).toBe(false);
+    expect(summary.selectable).toBe(false);
+    // wrk is drained but still "ready" — counts as up, like the old aggregate link did.
+    expect(summary.data as unknown as ControlSummaryData).toEqual({ ready: 1, total: 1, healthy: true });
+  });
+
+  it('flags a down worker in the control summary', () => {
+    const down = { ...wrk, swarmNode: { ...wrk.swarmNode!, state: 'down' } };
+    const rf = toNodeGroupedFlowNodes([mgr, down], null);
+    const summary = rf.find((n) => n.id === CONTROL_SUMMARY_ID)!;
+    expect(summary.data as unknown as ControlSummaryData).toEqual({ ready: 0, total: 1, healthy: false });
+  });
+
+  it('omits the control summary without both a manager and a worker', () => {
+    expect(toNodeGroupedFlowNodes([web, mgr], null).some((n) => n.id === CONTROL_SUMMARY_ID)).toBe(false);
+    expect(toNodeGroupedFlowNodes([wrk], null).some((n) => n.id === CONTROL_SUMMARY_ID)).toBe(false);
   });
 
   it('draws one card per service on each node, with stable ids, sorted by stack then service', () => {
@@ -182,5 +206,31 @@ describe('nodeUsage', () => {
   it('relates stats to capacity', () => {
     expect(nodeUsage(mgr.swarmNode, { cpuPercent: 200, memUsage: 2e9 })).toEqual({ cores: 4, cpuPercent: 50, memPercent: 25 });
     expect(nodeUsage(wrk.swarmNode, undefined)).toEqual({ cores: undefined });
+  });
+});
+
+describe('placeTasks active-task filter', () => {
+  const job: DGNode = {
+    id: 'service:ops_migrate', type: 'service', name: 'ops_migrate', status: 'running', stack: 'ops',
+    service: {
+      mode: 'replicated-job',
+      replicas: { running: 0, desired: 1 },
+      tasks: [
+        { id: 'done', slot: 1, nodeHostname: 'mgr', state: 'complete', desiredState: 'complete' },
+        { id: 'gone', slot: 2, nodeHostname: 'mgr', state: 'complete', desiredState: 'remove' },
+        { id: 'failed', slot: 3, nodeHostname: 'mgr', state: 'failed', desiredState: 'shutdown' },
+      ],
+    },
+  };
+
+  it('keeps completed job tasks and drops shutdown and removed ones', () => {
+    const ids = (placeTasks([mgr, job]).get('swarmnode:mgr') ?? []).map((p) => p.task.id);
+    expect(ids).toEqual(['done']);
+  });
+
+  it('matches the backend check for each desired state', () => {
+    const t = (desiredState: string) => ({ id: 'x', desiredState });
+    expect(['running', 'ready', 'complete', ''].map((s) => isActiveTask(t(s)))).toEqual([true, true, true, true]);
+    expect(['shutdown', 'remove'].map((s) => isActiveTask(t(s)))).toEqual([false, false]);
   });
 });

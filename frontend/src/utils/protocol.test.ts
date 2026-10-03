@@ -24,7 +24,32 @@ describe('protocolAction', () => {
     expect(protocolAction(PROTOCOL_VERSION + 1, sessionStorage)).toBe('reload');
   });
 
-  it('reloads without storage but never ignores', () => {
-    expect(protocolAction(PROTOCOL_VERSION + 1, undefined)).toBe('reload');
+  it('ignores a mismatch without storage, so a reload cannot loop', () => {
+    expect(protocolAction(PROTOCOL_VERSION + 1, null)).toBe('ignore');
+    expect(protocolAction(PROTOCOL_VERSION, null)).toBe('accept');
+  });
+
+  it('ignores a mismatch when storage throws, and never throws itself', () => {
+    const throwing = {
+      getItem: () => { throw new Error('SecurityError'); },
+      setItem: () => { throw new Error('QuotaExceededError'); },
+      removeItem: () => { throw new Error('SecurityError'); },
+    } as unknown as Storage;
+    expect(protocolAction(PROTOCOL_VERSION + 1, throwing)).toBe('ignore');
+    expect(protocolAction(PROTOCOL_VERSION, throwing)).toBe('accept');
+  });
+
+  it('ignores a mismatch when the marker write fails', () => {
+    const readOnly = {
+      getItem: () => null,
+      setItem: () => { throw new Error('QuotaExceededError'); },
+      removeItem: () => {},
+    } as unknown as Storage;
+    expect(protocolAction(PROTOCOL_VERSION + 1, readOnly)).toBe('ignore');
+  });
+
+  it('ignores a mismatch when the marker write does not stick', () => {
+    const forgetful = { getItem: () => null, setItem: () => {}, removeItem: () => {} } as unknown as Storage;
+    expect(protocolAction(PROTOCOL_VERSION + 1, forgetful)).toBe('ignore');
   });
 });

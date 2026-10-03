@@ -17,21 +17,36 @@ export type ProtocolAction = 'accept' | 'reload' | 'ignore';
  * If a reload for that server version already happened this session and the
  * bundle still disagrees, the message is ignored rather than looping reloads
  * or rendering a payload this bundle cannot interpret.
+ *
+ * The reload marker is what stops a loop, so this fails closed: when session
+ * storage is unavailable or throws, a mismatch is ignored instead of
+ * reloading. It never throws.
  */
-export function protocolAction(version: number, storage: Storage | undefined = safeSessionStorage()): ProtocolAction {
+export function protocolAction(version: number, storage: Storage | null = safeSessionStorage()): ProtocolAction {
   if (version === PROTOCOL_VERSION) {
-    storage?.removeItem(RELOAD_KEY);
+    try {
+      storage?.removeItem(RELOAD_KEY);
+    } catch {
+      // A stale marker only costs one skipped reload later.
+    }
     return 'accept';
   }
-  if (storage?.getItem(RELOAD_KEY) === String(version)) return 'ignore';
-  storage?.setItem(RELOAD_KEY, String(version));
+  if (!storage) return 'ignore';
+  try {
+    if (storage.getItem(RELOAD_KEY) === String(version)) return 'ignore';
+    storage.setItem(RELOAD_KEY, String(version));
+    // Read back: a write that silently didn't stick would loop too.
+    if (storage.getItem(RELOAD_KEY) !== String(version)) return 'ignore';
+  } catch {
+    return 'ignore';
+  }
   return 'reload';
 }
 
-function safeSessionStorage(): Storage | undefined {
+function safeSessionStorage(): Storage | null {
   try {
     return window.sessionStorage;
   } catch {
-    return undefined;
+    return null;
   }
 }

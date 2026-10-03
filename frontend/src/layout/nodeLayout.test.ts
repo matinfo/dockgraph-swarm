@@ -13,7 +13,7 @@ import {
   ROLE_GROUP_PADDING_TOP,
   SECTION_GAP,
 } from './nodeLayout';
-import { toNodeGroupedFlowNodes, UNASSIGNED_NODE_GROUP_ID } from '../utils/nodeTransform';
+import { toNodeGroupedFlowNodes, UNASSIGNED_NODE_GROUP_ID, CONTROL_SUMMARY_ID } from '../utils/nodeTransform';
 import { NODE_BOX_HEADER_HEIGHT, NODE_BOX_MIN_HEIGHT } from '../utils/constants';
 import type { DGNode, TaskInfo } from '../types';
 
@@ -28,7 +28,7 @@ function service(name: string, hosts: string[]): DGNode {
   const tasks: TaskInfo[] = hosts.map((h, i) => ({
     id: `${name}-${i}`, slot: i + 1, nodeHostname: h, state: 'running', desiredState: 'running',
   }));
-  return { id: `service:${name}`, type: 'service', name, status: 'running', service: { mode: 'replicated', tasks } };
+  return { id: `service:${name}`, type: 'service', name, status: 'running', service: { mode: 'replicated', replicas: { running: hosts.length, desired: hosts.length }, tasks } };
 }
 
 const byId = (nodes: RFNode[], id: string) => nodes.find((n) => n.id === id)!;
@@ -41,13 +41,15 @@ describe('layoutNodeGroups', () => {
   const web = service('web', ['m1', 'w1', 'w1', 'w9']);
   const pending: DGNode = {
     ...service('stuck', []),
-    service: { tasks: [{ id: 'p', slot: 1, state: 'pending', desiredState: 'running' }] },
+    service: { replicas: { running: 0, desired: 1 }, tasks: [{ id: 'p', slot: 1, state: 'pending', desiredState: 'running' }] },
   };
   const laid = layoutNodeGroups(toNodeGroupedFlowNodes([...managers, ...workers, web, pending], null));
 
   it('puts every manager on the top row and the Managers group first', () => {
     const mg = byId(laid, 'rolegroup:manager');
-    expect(mg.position).toEqual({ x: 0, y: 0 });
+    const wg = byId(laid, 'rolegroup:worker');
+    // Narrower than Workers, so centered over them.
+    expect(mg.position).toEqual({ x: (size(wg).w - size(mg).w) / 2, y: 0 });
     const ys = new Set(managers.map((m) => byId(laid, m.id).position.y));
     expect(ys).toEqual(new Set([ROLE_GROUP_PADDING_TOP]));
     expect(managers.map((m) => byId(laid, m.id).position.x)).toEqual([0, 1, 2].map(
@@ -59,7 +61,7 @@ describe('layoutNodeGroups', () => {
   it(`wraps workers every ${MAX_WORKERS_PER_ROW} boxes below the managers`, () => {
     const mg = byId(laid, 'rolegroup:manager');
     const wg = byId(laid, 'rolegroup:worker');
-    expect(wg.position.y).toBe(size(mg).h + SECTION_GAP);
+    expect(wg.position).toEqual({ x: 0, y: size(mg).h + SECTION_GAP });
 
     const pos = workers.map((w) => byId(laid, w.id).position);
     const rows = [...new Set(pos.map((p) => p.y))];
@@ -97,6 +99,21 @@ describe('layoutNodeGroups', () => {
     expect(size(byId(nodes, 'swarmnode:m1')).h).toBe(
       NODE_BOX_HEADER_HEIGHT + serviceCardHeight(2) + CARD_GAP + serviceCardHeight(1) + NODE_BOX_PADDING,
     );
+  });
+
+  it('centers the control summary badge in the gap between Managers and Workers', () => {
+    const mg = byId(laid, 'rolegroup:manager');
+    const wg = byId(laid, 'rolegroup:worker');
+    const summary = byId(laid, CONTROL_SUMMARY_ID);
+    expect(summary.position).toEqual({
+      x: Math.max(size(mg).w, size(wg).w) / 2,
+      y: size(mg).h + SECTION_GAP / 2,
+    });
+    // On the shared center axis of both groups.
+    expect(summary.position.x).toBe(mg.position.x + size(mg).w / 2);
+    expect(summary.position.x).toBe(wg.position.x + size(wg).w / 2);
+    // No width/height style forced on it — it sizes itself.
+    expect(summary.style?.width).toBeUndefined();
   });
 
   it('places the Unassigned box free-standing below the workers', () => {

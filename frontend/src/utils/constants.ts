@@ -70,11 +70,14 @@ export const MIN_DOTS = 3;
 /** Maximum number of animated dots per edge. */
 export const MAX_DOTS = 8;
 
-/** Radius of animated dots (px). */
-export const DOT_RADIUS = 1.8;
-
 /** Opacity of animated dots. */
 export const DOT_OPACITY = 0.6;
+
+/** Tip-to-base length of the animated arrowhead marker (px). */
+export const ARROW_LENGTH = 7;
+
+/** Half-width of the animated arrowhead's base (px). */
+export const ARROW_WIDTH = 3;
 
 /** Radius of edge endpoint circles (px). */
 export const ENDPOINT_RADIUS = 2.5;

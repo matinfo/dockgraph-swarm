@@ -162,6 +162,7 @@ func TestBuildComposeConfigMasksSecretsAndCapturesLabels(t *testing.T) {
 		},
 		Labels: composetypes.Labels{
 			"com.example.team": "platform",
+			"traefik.http.middlewares.auth.basicauth.users": "admin:$apr1$hash",
 		},
 	}
 
@@ -175,6 +176,9 @@ func TestBuildComposeConfigMasksSecretsAndCapturesLabels(t *testing.T) {
 	}
 	if got := cfg.Labels["com.example.team"]; got != "platform" {
 		t.Errorf("expected label captured, got %q", got)
+	}
+	if got := cfg.Labels["traefik.http.middlewares.auth.basicauth.users"]; got != "********" {
+		t.Errorf("expected credential label masked, got %q", got)
 	}
 }
 

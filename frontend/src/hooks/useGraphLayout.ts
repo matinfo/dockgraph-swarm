@@ -24,7 +24,8 @@ interface GraphLayoutResult {
 }
 
 /**
- * Topology fingerprint — changes only when nodes or edges are added/removed.
+ * Topology fingerprint — changes when nodes or edges are added/removed, or a
+ * workload moves to another network group.
  * Status changes (running -> exited) don't alter the fingerprint, so they
  * skip the expensive ELK layout and only update node/edge data in place.
  */
@@ -34,7 +35,14 @@ function topologyKey(dgNodes: DGNode[], dgEdges: DGEdge[], groupBy: GroupBy, loc
     // cards it will draw and the box holding each.
     return 'node|' + nodeGroupedTopologyKey(dgNodes, localNodeId);
   }
-  const nk = dgNodes.map((n) => n.id).sort().join(',');
+  // A workload's network group (its networkId, or the unmanaged group when it
+  // has neither a network nor a compose source) becomes its React Flow
+  // parentId, which the lightweight update doesn't touch, so it is part of the
+  // topology.
+  const nk = dgNodes
+    .map((n) => `${n.id}>${n.networkId ?? (n.source ? '' : '!')}`)
+    .sort()
+    .join(',');
   const ek = dgEdges.map((e) => e.id).sort().join(',');
   return 'network|' + nk + '|' + ek;
 }
@@ -97,15 +105,20 @@ export function useGraphLayout(
 
   // Full ELK layout — only when topology (node/edge set) changes.
   useEffect(() => {
-    if (dgNodes.length === 0) return;
     let cancelled = false;
 
-    const { rfNodes, rfEdges } = buildFlow(dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId);
-
-    // The per-node view has a deterministic grid layout (no ELK, no edges).
-    const layoutPromise = groupBy === 'node'
-      ? Promise.resolve({ nodes: layoutNodeGroups(rfNodes), edges: rfEdges })
-      : computeLayout(rfNodes, rfEdges);
+    let layoutPromise: Promise<{ nodes: RFNode[]; edges: RFEdge[] }>;
+    if (dgNodes.length === 0) {
+      // Empty topology (e.g. a stack with no resources): clear the canvas so
+      // the empty state never sits over a stale, still-interactive graph.
+      layoutPromise = Promise.resolve({ nodes: [], edges: [] });
+    } else {
+      const { rfNodes, rfEdges } = buildFlow(dgNodes, dgEdges, edgeStroke, accentStroke, groupBy, localNodeId);
+      // The per-node view has a deterministic grid layout (no ELK, no edges).
+      layoutPromise = groupBy === 'node'
+        ? Promise.resolve({ nodes: layoutNodeGroups(rfNodes), edges: rfEdges })
+        : computeLayout(rfNodes, rfEdges);
+    }
 
     layoutPromise
       .then((layout) => {
