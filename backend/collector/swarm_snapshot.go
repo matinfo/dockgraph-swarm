@@ -192,7 +192,13 @@ func buildSwarmNodeNodes(nodes []swarm.Node) []Node {
 	chosen := make(map[string]swarm.Node, len(nodes))
 	for _, n := range nodes {
 		name := swarmNodeName(n)
-		if prev, ok := chosen[name]; ok && !preferSwarmNode(n, prev) {
+		prev, ok := chosen[name]
+		if ok && prev.Status.State == swarm.NodeStateReady && n.Status.State == swarm.NodeStateReady {
+			// Not a stale entry of a rejoined node: two live members.
+			warnOnce("node-hostname:"+name, "swarm: nodes %s and %s are both ready with hostname %q; "+
+				"DockGraph keys nodes by hostname and shows only one (see README, Known limitations)", prev.ID, n.ID, name)
+		}
+		if ok && !preferSwarmNode(n, prev) {
 			continue
 		}
 		chosen[name] = n
