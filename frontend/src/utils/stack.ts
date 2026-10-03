@@ -37,13 +37,17 @@ export function isWorkload(node: DGNode): boolean {
 
 /**
  * True when the dashboard should summarise swarm services rather than
- * containers: the scoped graph holds services, or the cluster is in swarm
- * mode and the scope can hold services. The standalone scope only ever holds
- * project-less containers, so swarm mode alone doesn't switch it. Service
- * nodes still count before the system info has loaded.
+ * containers. The scoped workloads decide: any service means services
+ * (before the system info has loaded too), and containers only, e.g. a
+ * Compose project on a swarm-mode daemon, mean containers. Only a scope
+ * with no workload falls back to the mode: an empty named stack in swarm
+ * mode is a swarm stack, while the standalone scope only ever holds
+ * project-less containers.
  */
 export function showsSwarmWorkloads(nodes: DGNode[], swarm: boolean, stack: string | null | undefined): boolean {
-  return nodes.some((n) => n.type === 'service') || (swarm && stack !== STANDALONE_STACK);
+  if (nodes.some((n) => n.type === 'service')) return true;
+  if (nodes.some((n) => n.type === 'container')) return false;
+  return swarm && stack !== STANDALONE_STACK;
 }
 
 /** Prefix of the per-swarm-node aggregate keys in the live stats map and history. */
