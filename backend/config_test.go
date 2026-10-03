@@ -617,3 +617,28 @@ func TestReadSecretEnv_InlineWinsOverEmptyFile(t *testing.T) {
 		t.Fatalf("got %q, %v; want inline, nil", got, err)
 	}
 }
+
+func TestHealthcheckPort(t *testing.T) {
+	tests := []struct {
+		name, mode, port, agentPort, want string
+	}{
+		{"server_default", "", "", "", "7800"},
+		{"server_port", "swarm", "9000", "9001", "9000"},
+		{"agent_default", "agent", "9000", "", "7801"},
+		{"agent_port", "agent", "9000", "9001", "9001"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t, "DG_PASSWORD")
+			t.Setenv("DG_MODE", tt.mode)
+			t.Setenv("DG_PORT", tt.port)
+			t.Setenv("DG_AGENT_PORT", tt.agentPort)
+			// An unreadable password file would make LoadConfig exit: the
+			// probe must not read it (nor hash the password) at all.
+			t.Setenv("DG_PASSWORD_FILE", filepath.Join(t.TempDir(), "missing"))
+			if got := healthcheckPort(); got != tt.want {
+				t.Errorf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}

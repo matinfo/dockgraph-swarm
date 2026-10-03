@@ -49,17 +49,23 @@ var validModes = map[string]bool{
 }
 
 // LoadConfig reads configuration from environment variables with sensible defaults.
+// Default listen ports of the server and the per-node agent.
+const (
+	defaultPort      = "7800"
+	defaultAgentPort = "7801"
+)
+
 func LoadConfig() Config {
 	cfg := Config{
 		BindAddr:      "0.0.0.0",
-		Port:          "7800",
+		Port:          defaultPort,
 		PollInterval:  30 * time.Second,
 		StatsInterval: 3 * time.Second,
 		StatsWorkers:  50,
 
 		Mode:              collector.ModeAuto,
 		SwarmPollInterval: 5 * time.Second,
-		AgentPort:         "7801",
+		AgentPort:         defaultAgentPort,
 		AgentAddr:         "tasks.agent",
 	}
 
@@ -77,14 +83,7 @@ func LoadConfig() Config {
 	cfg.StatsInterval = parseDuration("DG_STATS_INTERVAL", cfg.StatsInterval, time.Second)
 	cfg.SwarmPollInterval = parseDuration("DG_SWARM_POLL_INTERVAL", cfg.SwarmPollInterval, time.Second)
 
-	if v := os.Getenv("DG_MODE"); v != "" {
-		mode := strings.ToLower(strings.TrimSpace(v))
-		if validModes[mode] {
-			cfg.Mode = mode
-		} else {
-			log.Printf("invalid DG_MODE %q, using default %s", v, cfg.Mode)
-		}
-	}
+	cfg.Mode = parseMode()
 
 	if v := os.Getenv("DG_COMPOSE_PATH"); v != "" {
 		parts := strings.Split(v, ",")
@@ -124,6 +123,31 @@ func LoadConfig() Config {
 	}
 
 	return cfg
+}
+
+// parseMode reads DG_MODE, keeping the default (auto) for an empty or
+// invalid value.
+func parseMode() string {
+	v := os.Getenv("DG_MODE")
+	if v == "" {
+		return collector.ModeAuto
+	}
+	mode := strings.ToLower(strings.TrimSpace(v))
+	if !validModes[mode] {
+		log.Printf("invalid DG_MODE %q, using default %s", v, collector.ModeAuto)
+		return collector.ModeAuto
+	}
+	return mode
+}
+
+// healthcheckPort returns the port --healthcheck probes: the agent's in
+// agent mode, the server's otherwise. It reads only DG_MODE and the ports,
+// unlike LoadConfig, so a probe never reads secrets or hashes the password.
+func healthcheckPort() string {
+	if parseMode() == collector.ModeAgent {
+		return parsePort("DG_AGENT_PORT", defaultAgentPort)
+	}
+	return parsePort("DG_PORT", defaultPort)
 }
 
 // parsePort reads a TCP port from an environment variable, keeping fallback

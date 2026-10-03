@@ -74,15 +74,11 @@ func main() {
 		os.Exit(0)
 	}
 
-	cfg := LoadConfig()
-
+	// Before LoadConfig: the probe runs every healthcheck interval and must
+	// not read secrets or run the Argon2id password hash each time.
 	if len(os.Args) > 1 && os.Args[1] == "--healthcheck" {
 		httpClient := &http.Client{Timeout: 5 * time.Second}
-		port := cfg.Port
-		if cfg.Mode == collector.ModeAgent {
-			port = cfg.AgentPort
-		}
-		resp, err := httpClient.Get("http://localhost:" + port + "/healthz")
+		resp, err := httpClient.Get("http://localhost:" + healthcheckPort() + "/healthz")
 		if err != nil {
 			os.Exit(1)
 		}
@@ -92,6 +88,8 @@ func main() {
 		}
 		os.Exit(0)
 	}
+
+	cfg := LoadConfig()
 
 	dockerCli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {

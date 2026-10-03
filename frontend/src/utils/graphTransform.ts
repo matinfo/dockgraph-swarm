@@ -1,18 +1,17 @@
 import type { Node as RFNode, Edge as RFEdge } from '@xyflow/react';
 import { networkColor, VOLUME_COLOR } from './colors';
-import { projectOf } from './stack';
+import { isServiceLive, projectOf } from './stack';
 import type { DGNode, DGEdge } from '../types';
 import { ANIMATION_NODE_LIMIT, DEFAULT_EDGE_STROKE_WIDTH } from './constants';
 
 const UNMANAGED_GROUP_ID = 'group:unmanaged';
 
 const RUNNING_STATUSES = new Set(['running']);
-/** Service states with at least part of the service up. */
-const SERVICE_ACTIVE_STATUSES = new Set(['running', 'degraded', 'updating']);
 
+/** True when an edge endpoint is live; a service while a replica runs. */
 function isEndpointActive(node: DGNode | undefined): boolean {
   if (!node) return false;
-  if (node.type === 'service') return SERVICE_ACTIVE_STATUSES.has(node.status ?? '');
+  if (node.type === 'service') return isServiceLive(node);
   if (node.type !== 'container') return true;
   return RUNNING_STATUSES.has(node.status ?? '');
 }

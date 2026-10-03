@@ -8,6 +8,7 @@ import { STATUS_COLORS, STATUS_LABELS } from '../utils/colors';
 import { useTheme } from '../theme';
 import { ghostBorder, railColor } from '../utils/nodeStyles';
 import { CONTAINER_NODE_HEIGHT, INACTIVE_OPACITY, zoomSelector } from '../utils/constants';
+import { isServiceLive } from '../utils/stack';
 import type { ServiceNodeData } from '../types';
 
 const ellipsis: React.CSSProperties = {
@@ -15,9 +16,6 @@ const ellipsis: React.CSSProperties = {
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 };
-
-/** Service states in which at least part of the service is serving. */
-const ACTIVE_STATUSES = new Set(['running', 'degraded', 'updating']);
 
 /** Short chip text for a swarm service mode. */
 function modeLabel(mode: string | undefined): string | null {
@@ -45,7 +43,7 @@ export const ServiceNode = memo(function ServiceNode({ data }: NodeProps) {
   const statusColor = STATUS_COLORS[status] ?? STATUS_COLORS.exited;
   const isGhost = status === 'not_running';
   const rail = railColor(isGhost, statusColor);
-  const isActive = ACTIVE_STATUSES.has(status);
+  const isActive = isServiceLive(dgNode);
   const replicas = dgNode.service?.replicas;
   const mode = modeLabel(dgNode.service?.mode);
   const degraded = status === 'degraded';
