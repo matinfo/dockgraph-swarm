@@ -153,6 +153,9 @@ func BuildStatsSnapshot(samples []ContainerSample, reportingNodes ...string) Sta
 	for name, agg := range services {
 		if _, taken := stats[name]; !taken {
 			stats[name] = agg
+		} else {
+			warnOnce("stats-name:"+name, "stats: a container and a swarm service are both named %q; "+
+				"stats are keyed by name, so the service shows the container's usage (see README, Known limitations)", name)
 		}
 	}
 	for key, agg := range nodes {

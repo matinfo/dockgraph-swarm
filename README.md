@@ -162,7 +162,7 @@ Demo stacks for swarm are in [`demo/stack-small.yml`](demo/stack-small.yml) and 
 
 - **Stack selector** — the header selector scopes every view to one stack (or to standalone containers). The choice lives in the URL (`?stack=`), so a scoped view can be bookmarked or shared.
 - **Graph by network** (default) — services appear inside their overlay networks like containers do, with replica badges. Click a service to open its detail panel: mode, replicas, the task table with the node of each task, and live service logs merged across nodes.
-- **Graph by node** — the **Network | Node** toggle above the graph (`?group=node`) lays out one box per swarm node, with a card for each service listing the tasks it runs there. Managers (leader first) and workers sit in separate, draggable groups. Each box shows the node's role, state, availability and CPU/memory against its capacity; inactive nodes are dimmed. A Managers → Workers link carries worker health (red and dashed with a count when a worker is down). Hovering a service highlights it on every node, and selecting it draws links to services it shares an overlay network with on other nodes. Click a node header for its detail panel.
+- **Graph by node** — the **Network | Node** toggle above the graph (`?group=node`) lays out one box per swarm node, with a card for each service listing the tasks it runs there. Managers (leader first) and workers sit in separate, draggable groups. Each box shows the node's role, state, availability and CPU/memory against its capacity; inactive nodes are dimmed. Managers fan out one control link per worker, coloured and animated by that worker's state, and a badge centred between the two groups reads `control / raft tcp 2377 / ready/total ok` (or the number of workers down). Hovering a service highlights it on every node, and selecting it draws links to services it shares an overlay network with on other nodes. Click a node header for its detail panel.
 - **Table** — a **Services** tab lists swarm services with their replica counts, and the grouping options include the stack.
 - **Dashboard** — a **Swarm Nodes** card lists every node with its role, task count and CPU/memory bars, and the resource history charts switch between **Workload** and **Node** series.
 
@@ -172,6 +172,11 @@ Demo stacks for swarm are in [`demo/stack-small.yml`](demo/stack-small.yml) and 
 - **With agents**, the server resolves `tasks.agent` periodically, polls each agent for stats and proxies container inspect/logs to the node running the container. A node whose agent is down or unreachable simply has no stats until it comes back.
 - Agents need the same token as the server; a mismatched token is rejected and that node's data is missing.
 - Running the standalone image on a swarm worker is refused in `auto` mode; set `DG_MODE=agent` there (or `DG_MODE=standalone` for a local-only view).
+
+### Known limitations
+
+- **Stats are keyed by name.** A standalone container named exactly like a swarm service (e.g. a container named `shop_web` next to the `shop_web` service) shares its stats entry, and the service shows the container's usage. Compose names its containers `project-service-N`, so this needs a manually named container. The server logs a warning when it happens.
+- **Swarm nodes are keyed by hostname**, which hides the stale entry a node leaves behind when it leaves and rejoins the swarm. Two live nodes with the same hostname (e.g. cloned VMs) therefore show as one, with their tasks and stats combined. Give each node a unique hostname; the server logs a warning when two ready nodes share one.
 
 ## Security Considerations
 
