@@ -169,4 +169,14 @@ describe("AlertsCard interactions", () => {
     fireEvent.click(screen.getByText("Container exited"));
     expect(onInspect).toHaveBeenCalledWith("container:db");
   });
+
+  it("inspects the swarm service an alert refers to", () => {
+    const onInspect = vi.fn();
+    const services: DGNode[] = [
+      { id: "service:shop_api", type: "service", name: "shop_api", status: "degraded", service: { replicas: { running: 1, desired: 2 } } },
+    ];
+    render(<AlertsCard nodes={services} statsMap={new Map()} onInspect={onInspect} />);
+    fireEvent.click(screen.getByText("Service degraded: 1/2 running"));
+    expect(onInspect).toHaveBeenCalledWith("service:shop_api");
+  });
 });

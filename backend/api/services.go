@@ -79,8 +79,16 @@ func HandleServiceInspect(inspector ServiceInspector, networks NetworkInspector)
 			log.Printf("service nodes %s: %v", id, err)
 		}
 
+		// Job modes have no desired count in the spec, and inspect doesn't
+		// carry swarm's own counts: read them like the graph does
+		// (ServiceList with Status), so a job isn't shown 0 desired, stopped.
+		job := isJobMode(svc.Spec.Mode)
+		if job {
+			svc.ServiceStatus = serviceStatusCounts(ctx, inspector, svc.ID)
+		}
+
 		resp := buildServiceInspectResponse(ctx, svc, tasks, nodes, networks)
-		if !tasksOK || !nodesOK {
+		if !tasksOK || !nodesOK || (job && svc.ServiceStatus == nil) {
 			fillReplicasFallback(ctx, inspector, svc, resp, tasksOK, nodesOK)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -100,21 +108,34 @@ func HandleServiceLogs(logger ServiceLogger) http.HandlerFunc {
 }
 
 // fillReplicasFallback corrects the replica counts and status of an inspect
-// response built from a failed task or node list. The running count comes
-// from the tasks, and a global service's desired count from the nodes; when
-// either is missing, swarm's own counts (ServiceList with Status) stand in.
-// If those are unavailable too, the status is unknown and replicas null.
+// response built from a failed task or node list, or for a job without
+// swarm's counts. The running count comes from the tasks, a global service's
+// desired count from the nodes and a job's from svc.ServiceStatus; when one
+// is missing, swarm's own counts (ServiceList with Status) stand in. If those
+// are unavailable too, the status is unknown and replicas null.
 func fillReplicasFallback(ctx context.Context, inspector ServiceInspector, svc swarm.Service, resp map[string]any, tasksOK, nodesOK bool) {
 	replicas, _ := resp["replicas"].(collector.ReplicaCount)
 	runningOK := tasksOK
 	// Replicated desired counts come from the spec, job counts from the
-	// service status: only global services need the node list.
-	desiredOK := nodesOK || svc.Spec.Mode.Global == nil
+	// service status, global counts from the node list.
+	var desiredOK bool
+	switch {
+	case isJobMode(svc.Spec.Mode):
+		desiredOK = svc.ServiceStatus != nil
+	case svc.Spec.Mode.Global != nil:
+		desiredOK = nodesOK
+	default:
+		desiredOK = true
+	}
 	if !tasksOK {
 		resp["tasksUnavailable"] = true
 	}
 	if !runningOK || !desiredOK {
-		if st := serviceStatusCounts(ctx, inspector, svc.ID); st != nil {
+		st := svc.ServiceStatus
+		if st == nil {
+			st = serviceStatusCounts(ctx, inspector, svc.ID)
+		}
+		if st != nil {
 			if !runningOK {
 				replicas.Running = int(st.RunningTasks)
 				runningOK = true
@@ -132,6 +153,12 @@ func fillReplicasFallback(ctx context.Context, inspector ServiceInspector, svc s
 	}
 	resp["replicas"] = replicas
 	resp[fieldStatus] = collector.ServiceStatusOf(svc, replicas)
+}
+
+// isJobMode reports whether a service runs to completion (replicated-job or
+// global-job): its desired count lives only in swarm's service status.
+func isJobMode(m swarm.ServiceMode) bool {
+	return m.ReplicatedJob != nil || m.GlobalJob != nil
 }
 
 // serviceStatusCounts returns swarm's running/desired task counts for a
