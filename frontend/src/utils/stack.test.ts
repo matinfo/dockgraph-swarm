@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  showsSwarmWorkloads,
   projectOf,
   listStacks,
   filterGraphByStack,
@@ -233,5 +234,24 @@ describe('consumerStats', () => {
       [`shop.api.1.${id}`, s], // its task: covered by the aggregate
     ]);
     expect([...consumerStats(m).keys()]).toEqual(['shop_web', `orphan_svc.1.${id}`, 'shop_web.backup', 'db', 'shop.api']);
+  });
+});
+
+describe('showsSwarmWorkloads', () => {
+  const svc: DGNode = { id: 'service:shop_web', type: 'service', name: 'shop_web', status: 'running' };
+  const lone: DGNode = { id: 'container:lone', type: 'container', name: 'lone', status: 'running' };
+
+  it('summarises services in swarm mode, for all stacks or a named one', () => {
+    expect(showsSwarmWorkloads([svc], true, null)).toBe(true);
+    expect(showsSwarmWorkloads([], true, 'shop')).toBe(true);
+  });
+
+  it('summarises containers in the standalone scope, even in swarm mode', () => {
+    expect(showsSwarmWorkloads([lone], true, STANDALONE_STACK)).toBe(false);
+  });
+
+  it('counts service nodes as swarm before the system info has loaded', () => {
+    expect(showsSwarmWorkloads([svc, lone], false, null)).toBe(true);
+    expect(showsSwarmWorkloads([lone], false, null)).toBe(false);
   });
 });
