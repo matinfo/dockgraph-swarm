@@ -5,7 +5,7 @@ import { STATUS_COLORS, networkColor } from "../../utils/colors";
 import { METRIC_COLORS } from "../dashboard/palette";
 import { formatBytes } from "../../utils/formatBytes";
 import { INACTIVE_OPACITY } from "../../utils/constants";
-import { projectOf } from "../../utils/stack";
+import { isServiceLive, projectOf } from "../../utils/stack";
 import { tableRow } from "./tableStyles";
 import type { DGNode } from "../../types";
 import type { ContainerStatsData } from "../../types/stats";
@@ -18,7 +18,7 @@ interface Props {
   gridTemplate: string;
 }
 
-const ACTIVE_STATUSES = new Set(["running", "unhealthy", "degraded", "updating"]);
+const ACTIVE_STATUSES = new Set(["running", "unhealthy"]);
 
 function formatPorts(node: DGNode): string {
   if (!node.ports || node.ports.length === 0) return "\u2014";
@@ -43,7 +43,8 @@ export const ContainerRow = memo(function ContainerRow({
   const { theme } = useTheme();
   const styles = tableRow(theme);
   const { handlers, rowStyle } = useRowHover();
-  const isActive = ACTIVE_STATUSES.has(node.status ?? "");
+  // A service is active while a replica runs, whatever its status.
+  const isActive = node.type === "service" ? isServiceLive(node) : ACTIVE_STATUSES.has(node.status ?? "");
   const isGhost = node.status === "not_running";
   const opacity = isActive ? 1 : INACTIVE_OPACITY;
   const statusColor = STATUS_COLORS[node.status ?? ""] ?? STATUS_COLORS.created;

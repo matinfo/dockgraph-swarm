@@ -188,8 +188,11 @@ describe('toReactFlowEdges', () => {
 
 describe('swarm services', () => {
   const nodes: DGNode[] = [
-    { id: 'service:shop_web', type: 'service', name: 'shop_web', status: 'degraded', networkId: 'network:shop_front', stack: 'shop' },
-    { id: 'service:shop_db', type: 'service', name: 'shop_db', status: 'stopped', stack: 'shop' },
+    {
+      id: 'service:shop_web', type: 'service', name: 'shop_web', status: 'degraded', networkId: 'network:shop_front', stack: 'shop',
+      service: { replicas: { running: 1, desired: 2 } },
+    },
+    { id: 'service:shop_db', type: 'service', name: 'shop_db', status: 'stopped', stack: 'shop', service: { replicas: { running: 0, desired: 0 } } },
     { id: 'network:shop_front', type: 'network', name: 'shop_front', stack: 'shop' },
     { id: 'volume:shop_data', type: 'volume', name: 'shop_data' },
   ];
@@ -208,9 +211,19 @@ describe('swarm services', () => {
     expect(result.find((n) => n.id === 'volume:shop_data')?.parentId).toBe('network:shop_front');
   });
 
-  it('treats degraded services as active and stopped ones as inactive', () => {
+  it('treats services with a running replica as active and stopped ones as inactive', () => {
     const result = toReactFlowEdges(edges, nodes, '#000');
     expect(result.find((e) => e.id === 'e:vol')?.data?.active).toBe(true);
     expect(result.find((e) => e.id === 'e:dep')?.data?.active).toBe(false);
+  });
+
+  it('treats a service with no running replica as inactive, whatever its status', () => {
+    for (const status of ['degraded', 'updating']) {
+      const down = nodes.map((n) => n.id === 'service:shop_web'
+        ? { ...n, status, service: { replicas: { running: 0, desired: 2 } } }
+        : n);
+      const result = toReactFlowEdges(edges, down, '#000');
+      expect(result.find((e) => e.id === 'e:vol')?.data?.active, status).toBe(false);
+    }
   });
 });

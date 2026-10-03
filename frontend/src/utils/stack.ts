@@ -50,6 +50,16 @@ export function showsSwarmWorkloads(nodes: DGNode[], swarm: boolean, stack: stri
   return swarm && stack !== STANDALONE_STACK;
 }
 
+/**
+ * True while a swarm service has at least one replica running. Its status
+ * can't tell: degraded covers 0/N, and updating wins even with nothing
+ * running. Without replica counts, only a running status counts.
+ */
+export function isServiceLive(node: DGNode): boolean {
+  const running = node.service?.replicas?.running;
+  return running !== undefined ? running > 0 : node.status === 'running';
+}
+
 /** Prefix of the per-swarm-node aggregate keys in the live stats map and history. */
 export const NODE_STATS_PREFIX = 'node:';
 

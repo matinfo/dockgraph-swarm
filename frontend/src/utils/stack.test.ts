@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   showsSwarmWorkloads,
+  isServiceLive,
   projectOf,
   listStacks,
   filterGraphByStack,
@@ -273,5 +274,27 @@ describe('showsSwarmWorkloads', () => {
   it('counts service nodes as swarm before the system info has loaded', () => {
     expect(showsSwarmWorkloads([svc, lone], false, null)).toBe(true);
     expect(showsSwarmWorkloads([lone], false, null)).toBe(false);
+  });
+});
+
+describe('isServiceLive', () => {
+  const svc = (status: string, running?: number): DGNode => ({
+    id: 'service:s', type: 'service', name: 's', status,
+    ...(running === undefined ? {} : { service: { replicas: { running, desired: 2 } } }),
+  });
+
+  it('is live while a replica runs, whatever the status', () => {
+    expect(isServiceLive(svc('degraded', 1))).toBe(true);
+    expect(isServiceLive(svc('updating', 2))).toBe(true);
+  });
+
+  it('is not live with no replica running, even when degraded or updating', () => {
+    expect(isServiceLive(svc('degraded', 0))).toBe(false);
+    expect(isServiceLive(svc('updating', 0))).toBe(false);
+  });
+
+  it('falls back to a running status without replica counts', () => {
+    expect(isServiceLive(svc('running'))).toBe(true);
+    expect(isServiceLive(svc('degraded'))).toBe(false);
   });
 });
