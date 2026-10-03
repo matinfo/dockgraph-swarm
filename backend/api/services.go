@@ -159,7 +159,7 @@ func buildServiceInspectResponse(ctx context.Context, svc swarm.Service, tasks [
 	resp := map[string]any{
 		"id":        svc.ID,
 		fieldName:   svc.Spec.Name,
-		"stack":     svc.Spec.Labels[collector.StackNamespaceLabel],
+		"stack":     collector.ProjectOf(svc.Spec.Labels), // as in the graph
 		fieldStatus: status,
 		"mode":      info.Mode,
 		"replicas":  info.Replicas,

@@ -155,6 +155,30 @@ func TestHandleServiceInspect(t *testing.T) {
 	}
 }
 
+// The panel's stack must match the graph's: the compose project label wins
+// over the stack namespace.
+func TestBuildServiceInspectResponseStack(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+		want   string
+	}{
+		{"stack namespace", map[string]string{collector.StackNamespaceLabel: "shop"}, "shop"},
+		{"compose project only", map[string]string{"com.docker.compose.project": "shop"}, "shop"},
+		{"both", map[string]string{"com.docker.compose.project": "shop", collector.StackNamespaceLabel: "other"}, "shop"},
+		{"none", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := swarm.Service{ID: "svc-web"}
+			svc.Spec.Labels = tc.labels
+			resp := buildServiceInspectResponse(context.Background(), svc, nil, nil, nil)
+			if got := resp["stack"]; got != tc.want {
+				t.Errorf("stack = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // inspectReplicas fetches a service and decodes its status fields.
 func inspectReplicas(t *testing.T, stub *stubDockerAPI, name string) (status string, replicas *collector.ReplicaCount, tasksUnavailable bool) {
 	t.Helper()
