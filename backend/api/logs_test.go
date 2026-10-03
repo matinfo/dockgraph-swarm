@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -944,6 +945,68 @@ func TestNewestLinesBefore(t *testing.T) {
 	got = newestLinesBefore(append([]logEntry(nil), lines...), "", 3)
 	if len(got) != 3 || got[0].Line != "a2" || got[2].Line != "a3" {
 		t.Errorf("newest page = %+v", got)
+	}
+}
+
+// taskGroupedServiceLogs opens a service log stream the way Docker sends it:
+// opts.Tail lines per task, one whole task after another. Task k's line i is
+// stamped base+(i*tasks+k)ms, so the tasks interleave in time and the newest
+// lines are spread across all of them.
+func taskGroupedServiceLogs(tasks int, base time.Time) logOpener {
+	return func(_ context.Context, _ string, opts containertypes.LogsOptions) (io.ReadCloser, error) {
+		tail, err := strconv.Atoi(opts.Tail)
+		if err != nil {
+			return nil, err
+		}
+		var buf bytes.Buffer
+		for k := range tasks {
+			for i := range tail {
+				ts := base.Add(time.Duration(i*tasks+k) * time.Millisecond).Format("2006-01-02T15:04:05.000000000Z")
+				buf.Write(buildLogFrame(1, fmt.Sprintf("%s task%d line%d\n", ts, k, i)))
+			}
+		}
+		return io.NopCloser(&buf), nil
+	}
+}
+
+func TestFetchLogHistoryServiceKeepsNewestLinesOfEveryTask(t *testing.T) {
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		tasks  int
+		limit  int
+		before string
+	}{
+		// Tail 2000 per task: 16000 lines in all.
+		{"before cursor", 8, 200, base.Add(time.Hour).Format(time.RFC3339Nano)},
+		// Tail 1000 per task: 11000 lines in all.
+		{"no cursor", 11, 1000, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines, err := fetchLogHistory(context.Background(), taskGroupedServiceLogs(tt.tasks, base), "svc", true, tt.before, tt.limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(lines) != tt.limit {
+				t.Fatalf("got %d lines, want %d", len(lines), tt.limit)
+			}
+			perTask := map[string]int{}
+			for i, l := range lines {
+				if i > 0 && l.Timestamp < lines[i-1].Timestamp {
+					t.Fatalf("lines out of order at %d: %q after %q", i, l.Timestamp, lines[i-1].Timestamp)
+				}
+				perTask[strings.Fields(l.Line)[0]]++
+			}
+			for k := range tt.tasks {
+				if got, want := perTask[fmt.Sprintf("task%d", k)], tt.limit/tt.tasks; got < want {
+					t.Errorf("task%d: %d lines in page, want at least %d (per task: %v)", k, got, want, perTask)
+				}
+			}
+			if last := lines[len(lines)-1].Line; !strings.HasPrefix(last, fmt.Sprintf("task%d ", tt.tasks-1)) {
+				t.Errorf("newest line = %q, want the last task's newest line", last)
+			}
+		})
 	}
 }
 

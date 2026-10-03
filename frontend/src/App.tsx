@@ -6,7 +6,7 @@ import { FlowCanvas } from './components/FlowCanvas';
 import { useDockGraph } from './hooks/useDockGraph';
 import { useContainerStats } from './hooks/useContainerStats';
 import { useStackScope } from './hooks/useStackScope';
-import { filterGraphByStack, isNodeStatsKey, isWorkload, listStacks } from './utils/stack';
+import { filterGraphByStack, isNodeStatsKey, isWorkload, listStacks, serviceOfTask } from './utils/stack';
 import type { ContainerStatsData } from './types';
 import { ThemeProvider, useTheme, type Theme } from './theme';
 
@@ -143,9 +143,6 @@ body {
 `;
 }
 
-/** Strips a real `.{slot|nodeId}.{taskId}` suffix from a per-task stats key. */
-const TASK_KEY_SUFFIX = /\.(?:\d+|[a-z0-9]{25})\.[a-z0-9]{25}$/;
-
 function AppContent() {
   const { stats, handleStatsMessage } = useContainerStats();
   const { nodes: allNodes, edges: allEdges, connected, ready } = useDockGraph(handleStatsMessage);
@@ -171,7 +168,7 @@ function AppContent() {
     const names = new Set(nodes.filter(isWorkload).map((n) => n.name));
     const scoped = new Map<string, ContainerStatsData>();
     for (const [key, value] of stats) {
-      if (isNodeStatsKey(key) || names.has(key) || names.has(key.replace(TASK_KEY_SUFFIX, ''))) scoped.set(key, value);
+      if (isNodeStatsKey(key) || names.has(key) || names.has(serviceOfTask(key) ?? '')) scoped.set(key, value);
     }
     return scoped;
   }, [stats, nodes, selectedStack]);

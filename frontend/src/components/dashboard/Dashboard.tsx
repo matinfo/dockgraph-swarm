@@ -14,7 +14,7 @@ import { SwarmNodesCard } from "./SwarmNodesCard";
 import { SegmentedToggle } from "../GroupByToggle";
 import { useStatsHistory, type TimeRange, type StatsHistoryData, type HistoryScope } from "../../hooks/useStatsHistory";
 import { useSystemInfo } from "../../hooks/useSystemInfo";
-import { STANDALONE_STACK, isWorkload, showsSwarmWorkloads } from "../../utils/stack";
+import { STANDALONE_STACK, isWorkload, showsSwarmWorkloads, withoutCoveredTasks } from "../../utils/stack";
 import type { ResourceTab } from "../table/TableView";
 import type { DGNode } from "../../types";
 import type { ContainerStatsData } from "../../types/stats";
@@ -35,14 +35,19 @@ interface Props {
 }
 
 /**
- * The backend can only filter history by a named stack. For the standalone
- * scope, keep the series of the (already scoped) workloads client-side.
+ * The workload history to chart. The backend can only filter history by a
+ * named stack, so for the standalone scope keep the series of the (already
+ * scoped) workloads client-side. Then plot each workload once: a swarm
+ * service's aggregate series stands for its task series.
  */
 function scopeHistory(data: StatsHistoryData | null, nodes: DGNode[], stack: string | null | undefined): StatsHistoryData | null {
-  if (!data || stack !== STANDALONE_STACK) return data;
-  const names = new Set(nodes.filter(isWorkload).map((n) => n.name));
-  const containers = Object.fromEntries(Object.entries(data.containers).filter(([name]) => names.has(name)));
-  return { ...data, containers };
+  if (!data) return data;
+  let containers = data.containers;
+  if (stack === STANDALONE_STACK) {
+    const names = new Set(nodes.filter(isWorkload).map((n) => n.name));
+    containers = Object.fromEntries(Object.entries(containers).filter(([name]) => names.has(name)));
+  }
+  return { ...data, containers: withoutCoveredTasks(containers) };
 }
 
 const HISTORY_SCOPES = [

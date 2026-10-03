@@ -3,10 +3,12 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/mount"
@@ -798,5 +800,85 @@ func TestSelfServicesIsSelfEvent(t *testing.T) {
 	plain := events.Message{Type: events.ContainerEventType, Actor: events.Actor{ID: "c2"}}
 	if self.IsSelfEvent(ctx, plain) {
 		t.Error("standalone container event must be kept")
+	}
+}
+
+// Events of a removed service must not inspect it again and again: each
+// lookup blocks the event loop. Removed services leave the cache.
+func TestSelfServicesMissingService(t *testing.T) {
+	calls := map[string]int{}
+	self := NewSelfServices(func(_ context.Context, id string) (swarm.Service, error) {
+		calls[id]++
+		svc := swarm.Service{ID: id}
+		switch id {
+		case "dg":
+			svc.Spec.Labels = map[string]string{SelfExcludeLabel: "true"}
+		case "gone":
+			return svc, cerrdefs.ErrNotFound
+		}
+		return svc, nil
+	})
+	ctx := context.Background()
+	svcEvent := func(id, action string) events.Message {
+		return events.Message{Type: events.ServiceEventType, Action: events.Action(action), Actor: events.Actor{ID: id}}
+	}
+	taskEvent := func(id, action string) events.Message {
+		return events.Message{Type: events.ContainerEventType, Action: events.Action(action), Actor: events.Actor{ID: "c-" + id, Attributes: map[string]string{swarmServiceIDLabel: id}}}
+	}
+
+	// A stack rm: the service goes, then its task containers stop.
+	for _, msg := range []events.Message{
+		svcEvent("gone", "remove"),
+		taskEvent("gone", "kill"), taskEvent("gone", "die"), taskEvent("gone", "stop"), taskEvent("gone", "destroy"),
+	} {
+		if self.IsSelfEvent(ctx, msg) {
+			t.Errorf("%s event of a removed service filtered", msg.Action)
+		}
+	}
+	if calls["gone"] != 1 {
+		t.Errorf("removed service inspected %d times, want 1", calls["gone"])
+	}
+
+	// A removed service's own remove event is still recognised as self,
+	// then the service leaves the cache.
+	if !self.IsSelfEvent(ctx, svcEvent("dg", "update")) || !self.IsSelfEvent(ctx, svcEvent("dg", "remove")) {
+		t.Error("dockgraph service events not filtered")
+	}
+	if _, ok := self.known["dg"]; ok || calls["dg"] != 1 {
+		t.Errorf("removed service still cached (inspect calls %d)", calls["dg"])
+	}
+
+	// The cache stays bounded however many services come and go.
+	for i := range selfCacheMax + 10 {
+		self.IsSelfEvent(ctx, svcEvent(fmt.Sprintf("svc-%d", i), "update"))
+	}
+	if n := len(self.known); n > selfCacheMax {
+		t.Errorf("cache holds %d services, want at most %d", n, selfCacheMax)
+	}
+}
+
+// A transient inspect failure is retried, but not before selfRetryAfter.
+func TestSelfServicesTransientError(t *testing.T) {
+	calls := 0
+	self := NewSelfServices(func(context.Context, string) (swarm.Service, error) {
+		calls++
+		return swarm.Service{}, errors.New("daemon busy")
+	})
+	now := time.Unix(1000, 0)
+	self.now = func() time.Time { return now }
+	task := events.Message{Type: events.ContainerEventType, Actor: events.Actor{ID: "c1", Attributes: map[string]string{swarmServiceIDLabel: "web"}}}
+
+	for range 3 {
+		if self.IsSelfEvent(context.Background(), task) {
+			t.Error("failed lookup must count as not self")
+		}
+	}
+	if calls != 1 {
+		t.Errorf("transient failure inspected %d times within the TTL, want 1", calls)
+	}
+	now = now.Add(selfRetryAfter + time.Second)
+	self.IsSelfEvent(context.Background(), task)
+	if calls != 2 {
+		t.Errorf("transient failure not retried after the TTL: %d calls", calls)
 	}
 }

@@ -72,7 +72,7 @@ export function seriesLabel(key: string): string {
  * `{service}.{nodeId}.{taskId}` (global); swarm IDs are 25 lowercase base-36
  * characters. Service names may contain dots, so the service is everything
  * before the final two task segments. Mirrors the backend's task-name check in
- * stats history.
+ * stats history; every frontend task-name check goes through serviceOfTask.
  */
 const TASK_NAME = /^(.+)\.(?:\d+|[a-z0-9]{25})\.[a-z0-9]{25}$/;
 
@@ -82,20 +82,38 @@ export function serviceOfTask(name: string): string | undefined {
 }
 
 /**
+ * True for a swarm task series whose service aggregate is also present
+ * (`has(service)`): the aggregate already sums it, so showing both counts the
+ * service twice. Tasks of a service without an aggregate are not covered, so
+ * their usage is never lost.
+ */
+export function isCoveredTask(key: string, has: (key: string) => boolean): boolean {
+  const svc = serviceOfTask(key);
+  return svc !== undefined && has(svc);
+}
+
+/**
  * Workload entries of the live stats map, each counted once: drops per-node
- * aggregates, and swarm task series whose service aggregate is present (the
- * aggregate already sums them). Tasks of a service without an aggregate are
- * kept, so their usage is never lost.
+ * aggregates, and swarm task series covered by their service aggregate (see
+ * isCoveredTask).
  */
 export function consumerStats(stats: Map<string, ContainerStatsData>): Map<string, ContainerStatsData> {
   const out = new Map<string, ContainerStatsData>();
   for (const [key, value] of stats) {
-    if (isNodeStatsKey(key)) continue;
-    const svc = serviceOfTask(key);
-    if (svc !== undefined && stats.has(svc)) continue;
+    if (isNodeStatsKey(key) || isCoveredTask(key, (k) => stats.has(k))) continue;
     out.set(key, value);
   }
   return out;
+}
+
+/**
+ * History series keyed by workload, each workload once: drops the swarm task
+ * series covered by their service aggregate (see isCoveredTask), as
+ * consumerStats does for live stats.
+ */
+export function withoutCoveredTasks<T>(series: Record<string, T>): Record<string, T> {
+  const has = (key: string) => Object.hasOwn(series, key);
+  return Object.fromEntries(Object.entries(series).filter(([key]) => !isCoveredTask(key, has)));
 }
 
 /** Returns the stats map without the per-node aggregates (workload entries only). */
@@ -202,9 +220,6 @@ export function stripStackPrefix(name: string, stack: string | undefined): strin
   return name;
 }
 
-/** Matches the `.{slot|nodeId}.{taskId}` suffix of a swarm task container name. */
-const TASK_SUFFIX = /\.[a-z0-9]+\.[a-z0-9]{20,}$/i;
-
 /**
  * Resolves a cross-reference (`type:name`) to a graph node ID. Docker and
  * compose often refer to workloads by short name (`web`) while graph nodes
@@ -220,7 +235,7 @@ export function resolveNodeRef(nodes: DGNode[], targetId: string, contextStack?:
   if (sepIdx < 0) return targetId;
   const type = targetId.slice(0, sepIdx);
   const name = targetId.slice(sepIdx + 1);
-  const baseName = name.replace(TASK_SUFFIX, '');
+  const baseName = serviceOfTask(name) ?? name;
 
   const types = type === 'container' ? ['container', 'service']
     : type === 'service' ? ['service', 'container']

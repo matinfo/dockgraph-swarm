@@ -16,9 +16,17 @@ import (
 
 // stubLocator maps container IDs to agent base URLs.
 type stubLocator struct {
-	mu    sync.Mutex
-	urls  map[string]string
-	calls int
+	mu     sync.Mutex
+	urls   map[string]string // found by LocateContainer
+	cached map[string]string // found by LocateCached
+	calls  int               // LocateContainer calls
+}
+
+func (s *stubLocator) LocateCached(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.cached[id]
+	return u, ok
 }
 
 func (s *stubLocator) LocateContainer(_ context.Context, id string) (string, bool) {
@@ -73,6 +81,9 @@ func newProxiedServer(t *testing.T, agent *agentRecorder, locator *stubLocator) 
 	t.Cleanup(agentSrv.Close)
 	for id := range locator.urls {
 		locator.urls[id] = agentSrv.URL
+	}
+	for id := range locator.cached {
+		locator.cached[id] = agentSrv.URL
 	}
 	docker := &stubDockerAPI{logger: &stubContainerLogger{}} // ContainerInspect always fails: nothing is local
 	handler := NewServer(NewHub(), fstest.MapFS{"index.html": {Data: []byte("ok")}}, &stubHealth{}, nil, docker, nil, nil, nil, "swarm",
@@ -255,6 +266,57 @@ func TestAgentProxyLocalAndUnknownServedLocally(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/containers/-bad", nil))
 	if rec.Code != http.StatusBadRequest || locator.calls != 1 {
 		t.Errorf("invalid: status %d, locator calls %d", rec.Code, locator.calls)
+	}
+}
+
+// countingInspector counts ContainerInspect calls.
+type countingInspector struct {
+	stubContainerInspector
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *countingInspector) ContainerInspect(ctx context.Context, id string) (containertypes.InspectResponse, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return c.stubContainerInspector.ContainerInspect(ctx, id)
+}
+
+func TestAgentProxyCachedRemoteSkipsLocalProbe(t *testing.T) {
+	agent := &agentRecorder{body: `{"lines":[]}`, ctype: "application/json"}
+	agentSrv := httptest.NewServer(agent)
+	t.Cleanup(agentSrv.Close)
+	locator := &stubLocator{cached: map[string]string{"shop_web.2.t2": agentSrv.URL}}
+	proxy := &AgentProxy{Locator: locator, Token: "tok"}
+	inspector := &countingInspector{stubContainerInspector: stubContainerInspector{err: errNotFoundStub}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/containers/{id}/logs/history", proxy.wrap(HandleContainerLogsHistory(&stubDockerAPI{logger: &stubContainerLogger{}}), inspector, "/logs/history", false))
+
+	for range 3 {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/containers/shop_web.2.t2/logs/history?limit=5", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d", rec.Code)
+		}
+	}
+	if agent.path != "/agent/v1/containers/shop_web.2.t2/logs/history" {
+		t.Errorf("agent path %q", agent.path)
+	}
+	if inspector.calls != 0 || locator.calls != 0 {
+		t.Errorf("local probes %d, full locates %d; want none for a cached remote container", inspector.calls, locator.calls)
+	}
+}
+
+func TestAgentProxySharesTransport(t *testing.T) {
+	p := &AgentProxy{Locator: &stubLocator{}}
+	if a, b := p.transport(), p.transport(); a == nil || a != b {
+		t.Error("wrapped routes must share one transport")
+	}
+	custom := &http.Transport{}
+	p = &AgentProxy{Locator: &stubLocator{}, Transport: custom}
+	if p.transport() != custom {
+		t.Error("a configured Transport must be used")
 	}
 }
 

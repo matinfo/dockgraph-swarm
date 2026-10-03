@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -196,21 +197,34 @@ func HandleAggregateLogsHistory(lister ContainerLister, logger ContainerLogger, 
 	}
 }
 
+// Service follower retry delays: a service log stream that fails to open or
+// ends is reopened after followRetryInitial, doubling up to followRetryLimit.
+const (
+	followRetryInitial = time.Second
+	followRetryLimit   = 30 * time.Second
+)
+
 // logAggregator fans multiple per-container log followers into one channel.
 type logAggregator struct {
-	logger    ContainerLogger
-	since     string
-	out       chan aggregateLine
-	mu        sync.Mutex
-	followers map[string]context.CancelFunc
+	logger     ContainerLogger
+	since      string
+	out        chan aggregateLine
+	retryDelay time.Duration // first service follower retry delay
+	mu         sync.Mutex
+	followers  map[string]*follower
 }
+
+// follower is one running source follower. Its identity lets an exiting
+// follower tell its own map entry from one added later for the same ID.
+type follower struct{ cancel context.CancelFunc }
 
 func newLogAggregator(logger ContainerLogger, since string) *logAggregator {
 	return &logAggregator{
-		logger:    logger,
-		since:     since,
-		out:       make(chan aggregateLine, 256),
-		followers: make(map[string]context.CancelFunc),
+		logger:     logger,
+		since:      since,
+		out:        make(chan aggregateLine, 256),
+		retryDelay: followRetryInitial,
+		followers:  make(map[string]*follower),
 	}
 }
 
@@ -227,23 +241,70 @@ func (a *logAggregator) addSource(parent context.Context, src logSource) {
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
-	a.followers[src.id] = cancel
-	go a.follow(ctx, src)
+	f := &follower{cancel: cancel}
+	a.followers[src.id] = f
+	go a.run(ctx, f, src)
 }
 
 // remove cancels and forgets a container's follower.
 func (a *logAggregator) remove(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if cancel, ok := a.followers[id]; ok {
-		cancel()
+	if f, ok := a.followers[id]; ok {
+		f.cancel()
 		delete(a.followers, id)
 	}
 }
 
-// follow streams one source's logs, tagging and forwarding each line.
-// A read error (container gone, cancelled) ends the follower without affecting others.
-func (a *logAggregator) follow(ctx context.Context, src logSource) {
+// forget drops id's entry if it still belongs to f, so the source can be
+// followed again, and releases f's context.
+func (a *logAggregator) forget(id string, f *follower) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.followers[id] == f {
+		delete(a.followers, id)
+	}
+	f.cancel()
+}
+
+// run follows one source until its context ends or, for a container, its
+// stream ends; a later start event can then follow it again. Services have no
+// start event to bring their logs back, so a service stream that fails to
+// open or ends (manager error, leader change, scaled to 0) is reopened with
+// backoff, resuming after the last line forwarded. A service the manager no
+// longer knows is not retried. Removal cancels the context, which also ends
+// any wait.
+func (a *logAggregator) run(ctx context.Context, f *follower, src logSource) {
+	defer a.forget(src.id, f)
+	since := a.since
+	delay := a.retryDelay
+	for {
+		last, err := a.follow(ctx, src, since)
+		if ctx.Err() != nil || !src.service || cerrdefs.IsNotFound(err) {
+			return
+		}
+		if ts, err := time.Parse(time.RFC3339Nano, last); err == nil {
+			// Since is inclusive; skip past the line already forwarded.
+			since = ts.Add(time.Nanosecond).Format(time.RFC3339Nano)
+			delay = a.retryDelay
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		delay = min(delay*2, followRetryLimit)
+	}
+}
+
+// follow streams one source's logs from since (or only new lines), tagging
+// and forwarding each line, and returns the timestamp of the last line
+// forwarded, along with the error that kept the stream from opening, if any.
+// A read error (container gone, cancelled) ends the stream without affecting
+// others.
+func (a *logAggregator) follow(ctx context.Context, src logSource, since string) (last string, openErr error) {
 	opts := containertypes.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
@@ -251,12 +312,12 @@ func (a *logAggregator) follow(ctx context.Context, src logSource) {
 		Timestamps: true,
 		Tail:       "0",
 	}
-	if a.since != "" {
-		opts.Since = a.since
+	if since != "" {
+		opts.Since = since
 	}
 	rc, err := src.open(ctx, src.id, opts)
 	if err != nil {
-		return
+		return "", err
 	}
 	defer rc.Close()
 
@@ -264,15 +325,18 @@ func (a *logAggregator) follow(ctx context.Context, src logSource) {
 	for {
 		streamType, payload, err := dlr.next()
 		if err != nil {
-			return
+			return last, nil
 		}
 		scanner := bufio.NewScanner(bytes.NewReader(payload))
 		for scanner.Scan() {
 			e := parseLogEntry(streamType, scanner.Text())
 			select {
 			case a.out <- aggregateLine{Container: src.name, Stream: e.Stream, Line: e.Line, Timestamp: e.Timestamp}:
+				if e.Timestamp != "" {
+					last = e.Timestamp
+				}
 			case <-ctx.Done():
-				return
+				return last, nil
 			}
 		}
 	}

@@ -43,14 +43,15 @@ export function listSwarmNodes(dgNodes: DGNode[]): DGNode[] {
 }
 
 /**
- * True for a task swarm still keeps on its node: any desired state except
- * "shutdown" and "remove". Job tasks end with desired state "complete" and
+ * True for a task that is current work on its node: any desired state except
+ * "shutdown" and "remove", unless the task has finished (state "complete").
+ * Job tasks carry desired state "complete" while they still run, so those
  * stay listed. Mirrors the backend's active-task check in buildServiceInfo;
- * the other tasks it sends are recent failures, shown only in the service
- * detail panel.
+ * the other tasks it sends are recent completions and failures, shown only
+ * in the service detail panel.
  */
 export function isActiveTask(task: TaskInfo): boolean {
-  return task.desiredState !== 'shutdown' && task.desiredState !== 'remove';
+  return task.desiredState !== 'shutdown' && task.desiredState !== 'remove' && task.state !== 'complete';
 }
 
 /**

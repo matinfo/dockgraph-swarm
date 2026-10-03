@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/mount"
@@ -603,14 +604,30 @@ const swarmServiceIDLabel = "com.docker.swarm.service.id"
 // resolves self-exclusion by service ID through this cache.
 type SelfServices struct {
 	inspect func(ctx context.Context, id string) (swarm.Service, error)
+	now     func() time.Time
 
 	mu    sync.Mutex
-	known map[string]bool
+	known map[string]selfEntry
 }
+
+// selfEntry is a cached answer. A zero expires never expires.
+type selfEntry struct {
+	self    bool
+	expires time.Time
+}
+
+// Bounds of the SelfServices cache. An inspect failing for another reason
+// than "not found" is retried only after selfRetryAfter, so a struggling
+// daemon doesn't stall every event on a new lookup. The cache starts over
+// once it holds selfCacheMax services.
+const (
+	selfRetryAfter = 30 * time.Second
+	selfCacheMax   = 1024
+)
 
 // NewSelfServices creates a cache that looks unknown services up via inspect.
 func NewSelfServices(inspect func(ctx context.Context, id string) (swarm.Service, error)) *SelfServices {
-	return &SelfServices{inspect: inspect, known: make(map[string]bool)}
+	return &SelfServices{inspect: inspect, now: time.Now, known: make(map[string]selfEntry)}
 }
 
 // IsSelfEvent reports whether a service event, or a task container event,
@@ -618,6 +635,9 @@ func NewSelfServices(inspect func(ctx context.Context, id string) (swarm.Service
 func (s *SelfServices) IsSelfEvent(ctx context.Context, msg events.Message) bool {
 	switch msg.Type {
 	case events.ServiceEventType:
+		if msg.Action == events.ActionRemove {
+			return s.forget(msg.Actor.ID)
+		}
 		return s.isSelf(ctx, msg.Actor.ID)
 	case events.ContainerEventType:
 		if id := msg.Actor.Attributes[swarmServiceIDLabel]; id != "" {
@@ -627,27 +647,45 @@ func (s *SelfServices) IsSelfEvent(ctx context.Context, msg events.Message) bool
 	return false
 }
 
-// isSelf looks a service up once and caches the answer. A failed inspect (for
-// example a service already removed) is not cached and counts as not self.
+// forget drops a removed service from the cache and returns its last known
+// answer. The service is gone, so there is nothing left to inspect.
+func (s *SelfServices) forget(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.known[id]
+	delete(s.known, id)
+	return e.self
+}
+
+// isSelf looks a service up once and caches the answer. A failed inspect
+// counts as not self: "not found" (a removed service) is cached for good,
+// any other error only for selfRetryAfter.
 func (s *SelfServices) isSelf(ctx context.Context, id string) bool {
 	if id == "" {
 		return false
 	}
 	s.mu.Lock()
-	self, ok := s.known[id]
+	e, ok := s.known[id]
 	s.mu.Unlock()
-	if ok {
-		return self
+	if ok && (e.expires.IsZero() || s.now().Before(e.expires)) {
+		return e.self
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	svc, err := s.inspect(ctx, id)
-	if err != nil {
-		return false
+	switch {
+	case err == nil:
+		e = selfEntry{self: IsServiceSelfExcluded(svc)}
+	case cerrdefs.IsNotFound(err):
+		e = selfEntry{}
+	default:
+		e = selfEntry{expires: s.now().Add(selfRetryAfter)}
 	}
-	self = IsServiceSelfExcluded(svc)
 	s.mu.Lock()
-	s.known[id] = self
+	if len(s.known) >= selfCacheMax {
+		clear(s.known)
+	}
+	s.known[id] = e
 	s.mu.Unlock()
-	return self
+	return e.self
 }
