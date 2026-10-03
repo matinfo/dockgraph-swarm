@@ -4,7 +4,7 @@ import { formatBytes } from '../../utils/formatBytes';
 import { STATUS_COLORS, cpuColor, swarmNodeStateColor } from '../../utils/colors';
 import { nodeStatsKey, taskContainerName } from '../../utils/stack';
 import { placeTasks, nodeUsage, formatCores, taskLabel, type PlacedTask } from '../../utils/nodeTransform';
-import { Section, Row, navLinkStyle, monoStyle } from './shared';
+import { Section, Row, navLinkStyle, navButtonReset, monoStyle } from './shared';
 import { Copyable } from './Copyable';
 import { DetailPanelStats } from './DetailPanelStats';
 import { SwarmRoleBadge, SwarmAvailabilityChip } from '../SwarmNodeBadges';
@@ -140,13 +140,14 @@ export function DetailPanelSwarmNode({ node, dgNodes, statsMap, onNavigate }: Pr
           byService.map(({ service, tasks }) => (
             <div key={service.id} style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: theme.nodeText, marginBottom: 3 }}>
-                <span
-                  style={{ fontFamily: 'var(--dg-font-mono)', ...navLinkStyle(theme.panelBorder) }}
+                <button
+                  type="button"
+                  style={{ ...navButtonReset, fontWeight: 600, fontFamily: 'var(--dg-font-mono)', ...navLinkStyle(theme.panelBorder) }}
                   title={`Inspect service ${service.name}`}
                   onClick={() => onNavigate(service.id)}
                 >
                   {service.name}
-                </span>
+                </button>
               </div>
               {tasks.map(({ task }) => {
                 const s = statsMap.get(taskContainerName(service.name, task));
