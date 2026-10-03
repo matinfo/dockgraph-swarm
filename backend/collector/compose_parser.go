@@ -237,21 +237,23 @@ func buildServiceEdges(svc composetypes.ServiceConfig, naming composeNaming, svc
 }
 
 // stackServiceInfo reads a stack service's deploy mode and replica count into
-// the ghost node's ServiceInfo. Replicated services default to one replica;
-// global services have no fixed count until they are scheduled.
+// the ghost node's ServiceInfo. Replicated services and jobs default to one
+// replica; global services and global jobs have no fixed count until the
+// manager schedules them on the eligible nodes.
 func stackServiceInfo(svc composetypes.ServiceConfig) *ServiceInfo {
 	info := &ServiceInfo{Mode: serviceModeReplicated, Replicas: ReplicaCount{Desired: 1}}
 	if svc.Deploy == nil {
 		return info
 	}
 	switch svc.Deploy.Mode {
-	case serviceModeGlobal:
-		info.Mode = serviceModeGlobal
+	case serviceModeGlobal, serviceModeGlobalJob:
+		info.Mode = svc.Deploy.Mode
 		info.Replicas.Desired = 0
-	case serviceModeReplicatedJob, serviceModeGlobalJob:
+		return info
+	case serviceModeReplicatedJob:
 		info.Mode = svc.Deploy.Mode
 	}
-	if svc.Deploy.Replicas != nil && info.Mode != serviceModeGlobal {
+	if svc.Deploy.Replicas != nil {
 		info.Replicas.Desired = *svc.Deploy.Replicas
 	}
 	return info
